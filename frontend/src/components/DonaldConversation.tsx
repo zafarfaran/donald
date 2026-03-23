@@ -38,6 +38,9 @@ function toolLine(toolName: string) {
 function userFacingErrorMessage(message: string): string {
   const m = (message || "").trim();
   if (!m) return "Something went wrong. Please try again.";
+  if (/missing\s+error_event|dynamic variables|agent config/i.test(m)) {
+    return "Agent config mismatch. Refresh and retry. If it repeats, update the ElevenLabs agent variables.";
+  }
   if (
     m.length > 140 ||
     /\bHTTP\b|401|403|404|500|502|503|ECONNREFUSED|Failed to fetch|NetworkError|JSON|session not found/i.test(m)
@@ -675,6 +678,10 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
     const dynamicVariables: Record<string, string | number | boolean> = {
       session_id: sessionId,
       sessionId,
+      // Some agent configs reference this key directly in templates.
+      // Send a safe default so missing-variable runtime errors don't kill the call.
+      error_event: "none",
+      errorEvent: "none",
     };
     voiceDevLog("session", "startSession requested", {
       agentId,
