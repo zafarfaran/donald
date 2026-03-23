@@ -88,6 +88,7 @@ def _normalize_regret_sum_0_5(
 
 def _snapshot_to_canonical(snapshot: dict[str, Any]) -> dict[str, Any]:
     total = int(snapshot.get("total_cards") or snapshot.get("degrees_cooked") or 0)
+    people = int(snapshot.get("people_talked_to_donald") or total)
     c_count = int(snapshot.get("c_or_worse_count") or 0)
     if c_count == 0 and total > 0 and "c_or_worse_pct" in snapshot:
         try:
@@ -114,6 +115,7 @@ def _snapshot_to_canonical(snapshot: dict[str, Any]) -> dict[str, Any]:
 
     return _render_aggregate_snapshot(
         total_cards=max(0, total),
+        people_talked_to_donald=max(0, people),
         c_or_worse_count=max(0, c_count),
         tuition_in_shambles_usd=max(0, tuition),
         regret_sum_0_5=regret_sum,
@@ -121,22 +123,23 @@ def _snapshot_to_canonical(snapshot: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
+def _compute_from_cards(cards: list[ReportCard], *, people_count: int | None = None) -> dict[str, Any]:
     total = len(cards)
+    people = max(0, int(people_count if people_count is not None else total))
     if total == 0:
         return {
             "total_cards": 0,
             "c_or_worse_count": 0,
             "regret_sum_0_5": 0.0,
             "degrees_cooked": 0,
-            "people_talked_to_donald": 0,
+            "people_talked_to_donald": people,
             "c_or_worse_pct": 0.0,
             "tuition_in_shambles_usd": 0,
             "regret_score_0_5": 0.0,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "display": {
                 "degrees_cooked": "0+",
-                "people_talked_to_donald": "0+",
+                "people_talked_to_donald": f"{people:,}+",
                 "c_or_worse_pct": "0%",
                 "tuition_in_shambles": "$0",
                 "regret_score": "0.0/5",
@@ -173,14 +176,14 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
         "c_or_worse_count": c_or_worse,
         "regret_sum_0_5": regret_sum,
         "degrees_cooked": total,
-        "people_talked_to_donald": total,
+        "people_talked_to_donald": people,
         "c_or_worse_pct": pct,
         "tuition_in_shambles_usd": tuition_in_shambles,
         "regret_score_0_5": regret,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "display": {
             "degrees_cooked": f"{total:,}+",
-            "people_talked_to_donald": f"{total:,}+",
+            "people_talked_to_donald": f"{people:,}+",
             "c_or_worse_pct": f"{round(pct)}%",
             "tuition_in_shambles": _format_compact_usd(tuition_in_shambles),
             "regret_score": f"{regret:.1f}/5",
@@ -211,6 +214,19 @@ async def _collect_report_cards(store) -> list[ReportCard]:
         if isinstance(session, Session) and session.report_card:
             cards.append(session.report_card)
     return cards
+
+
+async def _count_sessions(store) -> int:
+    if getattr(store, "uses_firestore", False):
+        db = get_async_firestore()
+        if not db:
+            return 0
+        n = 0
+        async for _ in db.collection(SESSIONS_COLLECTION).stream():
+            n += 1
+        return n
+    memory = getattr(store, "_memory", {})
+    return sum(1 for s in memory.values() if isinstance(s, Session))
 
 
 def _card_contribution(card: ReportCard) -> dict[str, Any]:
@@ -244,8 +260,10 @@ def _render_aggregate_snapshot(
     tuition_in_shambles_usd: int,
     regret_sum_0_5: float,
     updated_at: str,
+    people_talked_to_donald: int | None = None,
 ) -> dict[str, Any]:
     total = max(0, int(total_cards))
+    people = max(0, int(people_talked_to_donald if people_talked_to_donald is not None else total))
     c_count = max(0, min(total, int(c_or_worse_count)))
     tuition = max(0, int(tuition_in_shambles_usd))
     regret_sum = _normalize_regret_sum_0_5(
@@ -261,14 +279,14 @@ def _render_aggregate_snapshot(
         "c_or_worse_count": c_count,
         "regret_sum_0_5": round(regret_sum, 4),
         "degrees_cooked": total,
-        "people_talked_to_donald": total,
+        "people_talked_to_donald": people,
         "c_or_worse_pct": pct,
         "tuition_in_shambles_usd": tuition,
         "regret_score_0_5": regret,
         "updated_at": updated_at,
         "display": {
             "degrees_cooked": f"{total:,}+",
-            "people_talked_to_donald": f"{total:,}+",
+            "people_talked_to_donald": f"{people:,}+",
             "c_or_worse_pct": f"{round(pct)}%",
             "tuition_in_shambles": _format_compact_usd(tuition),
             "regret_score": f"{regret:.1f}/5",
@@ -359,8 +377,10 @@ def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> 
         next_regret_sum = base_regret_sum + float(new_contrib["regret_sum_0_5"]) - float(old.get("regret_sum_0_5") or 0.0)
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        base_people = int(metrics.get("people_talked_to_donald") or base_total)
         snapshot = _render_aggregate_snapshot(
             total_cards=max(0, next_total),
+            people_talked_to_donald=max(0, base_people),
             c_or_worse_count=max(0, next_c),
             tuition_in_shambles_usd=max(0, next_tuition),
             regret_sum_0_5=max(0.0, next_regret_sum),
@@ -402,6 +422,7 @@ def apply_report_card_update_memory(store, session_id: str, report_card: ReportC
     if not isinstance(snapshot, dict):
         snapshot = _render_aggregate_snapshot(
             total_cards=0,
+            people_talked_to_donald=0,
             c_or_worse_count=0,
             tuition_in_shambles_usd=0,
             regret_sum_0_5=0.0,
@@ -415,9 +436,11 @@ def apply_report_card_update_memory(store, session_id: str, report_card: ReportC
         "regret_sum_0_5": 0.0,
     }
     new = _card_contribution(report_card)
+    current_people = int(snapshot.get("people_talked_to_donald") or 0)
 
     next_snapshot = _render_aggregate_snapshot(
         total_cards=int(snapshot.get("total_cards") or 0) + int(new["total_cards"]) - int(old.get("total_cards") or 0),
+        people_talked_to_donald=max(0, current_people),
         c_or_worse_count=int(snapshot.get("c_or_worse_count") or 0) + int(new["c_or_worse_count"]) - int(old.get("c_or_worse_count") or 0),
         tuition_in_shambles_usd=int(snapshot.get("tuition_in_shambles_usd") or 0)
         + int(new["tuition_in_shambles_usd"])
@@ -434,7 +457,8 @@ def apply_report_card_update_memory(store, session_id: str, report_card: ReportC
 
 async def recompute_public_metrics(store) -> dict[str, Any]:
     cards = await _collect_report_cards(store)
-    snapshot = _compute_from_cards(cards)
+    people_count = await _count_sessions(store)
+    snapshot = _compute_from_cards(cards, people_count=people_count)
     if getattr(store, "uses_firestore", False):
         await _write_metrics_snapshot(snapshot)
         await asyncio.to_thread(_rebuild_contrib_docs_sync, cards)
@@ -445,15 +469,22 @@ async def recompute_public_metrics(store) -> dict[str, Any]:
 
 
 async def get_public_metrics(store) -> dict[str, Any]:
+    people_count = await _count_sessions(store)
     if not getattr(store, "uses_firestore", False):
         mem_snap = getattr(store, "_metrics_snapshot", None)
         if isinstance(mem_snap, dict):
             canonical = _snapshot_to_canonical(mem_snap)
+            canonical["people_talked_to_donald"] = max(0, int(people_count))
+            canonical.setdefault("display", {})
+            canonical["display"]["people_talked_to_donald"] = f"{max(0, int(people_count)):,}+"
             setattr(store, "_metrics_snapshot", canonical)
             return canonical
     snap = await _read_metrics_snapshot()
     if isinstance(snap, dict):
         canonical = _snapshot_to_canonical(snap)
+        canonical["people_talked_to_donald"] = max(0, int(people_count))
+        canonical.setdefault("display", {})
+        canonical["display"]["people_talked_to_donald"] = f"{max(0, int(people_count)):,}+"
         # Self-heal legacy snapshots in Firestore when canonical values changed.
         if canonical != snap:
             await _write_metrics_snapshot(canonical)
