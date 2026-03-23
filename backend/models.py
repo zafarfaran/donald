@@ -24,6 +24,16 @@ class ResearchSource(BaseModel):
     topic: str = ""  # short label, e.g. which search theme this came from
 
 
+class JobTaskExposure(BaseModel):
+    """One concrete work task with time share and automation exposure (from Claude task decomposition)."""
+
+    task: str = ""
+    time_pct: int = 0  # ~% of workweek; server clamps
+    automation_score_0_100: int = 50
+    reasoning: str = ""
+    timeline_horizon: str = "longer"  # now | 1_2_years | 3_5_years | longer
+
+
 class UserProfile(BaseModel):
     name: str
     degree: str
@@ -89,6 +99,21 @@ class ResearchData(BaseModel):
     ai_replacement_risk_0_100: int | None = None
     ai_risk_reasoning: str = ""
     overall_cooked_0_100: int | None = None
+    # Task decomposition (optional): when present, ai_replacement_risk_0_100 is time-weighted from tasks.
+    job_task_exposure: list[JobTaskExposure] = Field(default_factory=list)
+    near_term_ai_risk_0_100: int | None = Field(
+        None,
+        description="AI exposure in ~0–2y horizon from tasks with timeline now/1_2_years only.",
+    )
+    # Cooked meter components (higher = worse). overall_cooked blends these with AI risk.
+    career_market_stress_0_100: int | None = Field(
+        None,
+        description="Job market / trajectory stress from trend + unemployment.",
+    )
+    financial_roi_stress_0_100: int | None = Field(
+        None,
+        description="Tuition vs index opportunity-cost stress.",
+    )
     safeguard_tips: list[str] = []
     honest_take: str = ""
 

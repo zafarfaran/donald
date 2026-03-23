@@ -96,7 +96,11 @@ Swagger: `http://127.0.0.1:8000/docs`
 |-------|--------|---------|
 | `/api/session` | POST | Create session (profile + optional `years_experience`) |
 | `/api/session/{id}/voice-activity` | GET | Poll during voice: webhook + research steps for activity UI |
-| `/api/research` | POST | Run full pipeline → report card |
+| `/api/research` | POST | Queue research (Celery) → `202` + `task_id`, or sync if `CELERY_DISABLED=1` |
+| `/api/research/task/{task_id}/status` | GET | Celery task status |
+| `/api/research/task/{task_id}/result` | GET | Fetch result + persist to session |
+| `/health` | GET | Liveness |
+| `/ready` | GET | Redis + Firestore readiness |
 | `/api/report-card/{id}` | GET | Fetch report (grade, financials, AI risk, tips, honest take) |
 | `/api/webhooks/update_user_profile` | POST | Merge profile fields from conversation (partial JSON) |
 | `/api/webhooks/research_degree` | POST | Same as research, webhook format for voice agent |
@@ -110,3 +114,28 @@ Swagger: `http://127.0.0.1:8000/docs`
 | Firecrawl | 9 searches × ~$0.001 = ~$0.01 |
 | Claude (haiku) | 1 call, ~1200 tokens out = ~$0.002 |
 | **Total** | **~$0.012** |
+
+## Firestore security rules
+
+Repo root includes [`firestore.rules`](../firestore.rules): **deny all** reads/writes from client SDKs (your API uses the **Admin SDK** and ignores these rules).
+
+Deploy to Firebase (requires [Firebase CLI](https://firebase.google.com/docs/cli)):
+
+```bash
+cd path/to/donald/donald
+firebase login
+firebase deploy --only firestore:rules
+```
+
+Project is set in [`.firebaserc`](../.firebaserc) (`heyitdonald`). You can also paste the same rules in **Firebase console → Firestore → Rules**.
+
+**Important:** If your shell has `FIRESTORE_DISABLED=1` (e.g. from a test), the API will **not** use Firestore — unset it in production: `Remove-Item Env:FIRESTORE_DISABLED` (PowerShell) or `unset FIRESTORE_DISABLED` (bash).
+
+## Production (Railway / Docker)
+
+- **Firestore:** Set `GOOGLE_CLOUD_PROJECT` or `FIRESTORE_PROJECT_ID` and credentials (`GOOGLE_APPLICATION_CREDENTIALS` or workload identity). Use `FIRESTORE_DISABLED=1` only for local dev without GCP.
+- **Redis:** Set `REDIS_URL` (Railway Redis plugin provides this). Use `REDIS_DISABLED=1` only when you intentionally skip Redis.
+- **Celery:** Run a **worker** service: `celery -A backend.celery_app worker -l info`. Set `CELERY_DISABLED=1` on the API if you are not running Redis/workers (HTTP `POST /api/research` then runs **synchronously** in the API process).
+- **Observability:** `SENTRY_DSN`, optional `OTEL_EXPORTER_OTLP_ENDPOINT` (HTTP OTLP; path `/v1/traces` is appended automatically).
+- **Docker Compose:** From repo root `donald/`, `docker compose up --build` starts API + worker + Redis (see `docker-compose.yml`).
+- **Health:** `GET /health` (liveness), `GET /ready` (Redis + Firestore checks when enabled).

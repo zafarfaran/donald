@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import os
 import asyncio
-import logging
 from dataclasses import dataclass, field
+
+import structlog
 from datetime import datetime
 from typing import Awaitable, Callable
 
@@ -24,7 +25,7 @@ import anthropic
 
 from backend.services.money_locale import format_money_int, grad_timeline
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 PROMPT_CACHING_BETA_HEADER = "prompt-caching-2024-07-31"
 
 SearchFn = Callable[[str], Awaitable[dict]]
@@ -112,7 +113,13 @@ ANALYSIS_TOOL = {
             },
             "ai_replacement_risk_0_100": {
                 "type": "integer",
-                "description": "How likely AI/automation replaces this specific role (0 = safe, 100 = fully automatable). Factor in seniority, task mix, recent AI developments from snippets, and which parts of the job are routine vs judgment-based.",
+                "description": (
+                    "AI/automation exposure for this role (0=safe, 100=fully automatable). "
+                    "Be **harsh and pessimistic**: junior/assistant/associate layers, rules-heavy compliance, "
+                    "templated writing, scheduling, data prep, first-pass review, and routine triage should score **high** (often 65–95). "
+                    "Reserve low scores only for strong liability, physical presence, regulated sign-off, or rare expert judgment. "
+                    "Factor seniority, task mix, and snippets."
+                ),
             },
             "ai_risk_reasoning": {
                 "type": "string",
@@ -131,6 +138,45 @@ ANALYSIS_TOOL = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Up to 5 org names in snippets (BLS, ONS, Glassdoor, Payscale, McKinsey, etc.). Empty array if none.",
+            },
+            "tasks": {
+                "type": "array",
+                "description": (
+                    "REQUIRED: 5–8 weekly tasks. time_pct sums ~100. Per-task automation_score_0_100: **score harshly** — "
+                    "routine desk work, playbooks, checklists, junior execution, and rules-based steps are usually **70–95**; "
+                    "only score low (under ~45) for real hands-on, trust, liability, or messy human judgment. "
+                    "timeline_horizon: when exposure hits. Server time-weights tasks + applies a pessimism bump — still set ai_replacement_risk_0_100 consistently."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "description": "Short label, e.g. 'Draft client emails'."},
+                        "time_pct": {
+                            "type": "integer",
+                            "description": "Approximate % of workweek on this task (0–100) — all tasks should sum to ~100.",
+                        },
+                        "automation_score_0_100": {
+                            "type": "integer",
+                            "description": (
+                                "0–100 for this task only. Err high for repetitive, rules-driven, or junior execution work; "
+                                "low only for irreplaceable judgment, physical, or regulated accountability."
+                            ),
+                        },
+                        "reasoning": {"type": "string", "description": "One sentence: why this score for this task."},
+                        "timeline_horizon": {
+                            "type": "string",
+                            "enum": ["now", "1_2_years", "3_5_years", "longer"],
+                            "description": "When AI could realistically take most of this task.",
+                        },
+                    },
+                    "required": [
+                        "task",
+                        "time_pct",
+                        "automation_score_0_100",
+                        "reasoning",
+                        "timeline_horizon",
+                    ],
+                },
             },
         },
         "required": [
@@ -179,6 +225,7 @@ class LLMAnalysis:
     safeguard_tips: list[str] = field(default_factory=list)
     honest_take: str = ""
     source_orgs_mentioned: list[str] = field(default_factory=list)
+    job_tasks: list[dict] | None = None  # raw task rows from submit_analysis.tasks
 
 
 @dataclass
@@ -220,6 +267,10 @@ def _max_search_calls() -> int:
 
 
 def _parse_analysis_dict(d: dict) -> LLMAnalysis:
+    raw_tasks = d.get("tasks")
+    job_tasks: list[dict] | None = None
+    if isinstance(raw_tasks, list) and raw_tasks:
+        job_tasks = [t for t in raw_tasks if isinstance(t, dict)]
     return LLMAnalysis(
         avg_salary_for_degree=d.get("avg_salary_for_degree"),
         avg_salary_for_role=d.get("avg_salary_for_role"),
@@ -239,6 +290,7 @@ def _parse_analysis_dict(d: dict) -> LLMAnalysis:
         safeguard_tips=d.get("safeguard_tips", []),
         honest_take=d.get("honest_take", ""),
         source_orgs_mentioned=list(d.get("source_orgs_mentioned") or []),
+        job_tasks=job_tasks,
     )
 
 
@@ -257,8 +309,17 @@ You have two tools:
 3. Total tuition cost at their university.
 4. Broad equity index returns (S&P 500, FTSE 100, STOXX 600, etc.) from their graduation year to present — record the annualized % in `sp500_annual_return_pct` regardless of which index.
 5. Job market trend for their role (growing / flat / shrinking), unemployment rate, openings.
-6. AI / automation replacement risk for their specific role + tasks.
+6. **Task decomposition for AI risk (required):** In `tasks`, list **5–8 concrete tasks** they actually do (not the job title). For each: `time_pct` (shares of week, sum ≈ 100), `automation_score_0_100` for **that task** (0=safe, 100=fully automatable today/near future), `timeline_horizon` (now / 1_2_years / 3_5_years / longer), and one-line `reasoning` citing judgment vs routine, tools already in market, regulation, physical presence, etc.
 7. Degree ROI ranking, lifetime earnings, degree premium vs non-degree.
+
+### AI risk rubric (per task) — **harsh / pessimistic**
+- **Default skeptical of desk jobs:** junior, coordinator, assistant, analyst (early-career), and any role that mostly applies rules, templates, or playbooks → task scores are usually **high** (often 70–95 for the bulk of time).
+- First drafts, email/slide prep, scheduling, data cleaning, ticket triage, simple coding glue, first-pass QA → **high**; these are already in-market for LLMs and agents.
+- Physical world, personal liability, surgery-level accountability, regulated sign-off you cannot delegate, or genuinely novel negotiation with no playbook → **lower** scores — but do not give “safe” scores just because the title sounds senior; look at what they *do* hour by hour.
+- If **years of experience** is low or unknown, assume more execution and less strategy → **higher** average automation.
+- `timeline_horizon`: **now** / **1_2_years** when tools already exist; **longer** only when deployment friction is real (law, unions, trust, physical reality).
+
+The backend **time-weights** `tasks` and applies a small pessimism calibration — still set `ai_replacement_risk_0_100` to match your task mix (same harsh mindset).
 
 ## Search guidelines
 - Target 4–6 focused searches. Do not repeat overlapping queries.
@@ -576,7 +637,10 @@ def _build_prompt(
         "4. Lifetime earnings and degree premium: same currency as profile.\n"
         "5. Unemployment / job openings from local statistics if present.\n\n"
         "### AI & career analysis\n"
-        "6. AI replacement risk 0–100 from snippets and role nature.\n"
+        "6. **tasks** (required): 5–8 weekly tasks; time_pct ~100; per-task automation_score_0_100 — **score harshly**: "
+        "rules-heavy, junior execution, templates, triage, and routine desk work → high scores (often 70–95); "
+        "only low scores for real liability, physical, or irreplaceable judgment. timeline_horizon as in the tool. "
+        "Server time-weights tasks + pessimism calibration.\n"
         "7. Safeguard tips: 4–6 specific actions for this person.\n\n"
         "### Honest take\n"
         "8. 2–4 sentences with correct currency symbols (£ $ € …) matching PRIMARY CURRENCY. "
@@ -664,5 +728,5 @@ async def analyze_with_llm(
             )
         return _parse_tool_response(response)
     except Exception:
-        logger.exception("Claude analysis failed — falling back to heuristics")
+        logger.exception("Claude one-shot analysis failed")
         return None

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { FirebaseRoot } from "@/components/FirebaseRoot";
 
 export const metadata: Metadata = {
   title: "Donald | Is Your Degree Cooked?",
@@ -14,7 +15,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <FirebaseRoot />
+        {children}
+      </body>
     </html>
   );
 }

@@ -31,7 +31,26 @@ const MOCK_REPORT_CARD = {
     degree_roi_rank: "312/400",
     job_market_trend: "shrinking",
     ai_replacement_risk_0_100: 72,
+    near_term_ai_risk_0_100: 78,
+    career_market_stress_0_100: 85,
+    financial_roi_stress_0_100: 62,
     overall_cooked_0_100: 68,
+    job_task_exposure: [
+      {
+        task: "Draft social and email copy",
+        time_pct: 30,
+        automation_score_0_100: 82,
+        timeline_horizon: "now",
+        reasoning: "First drafts and variants are already common LLM workflows.",
+      },
+      {
+        task: "Stakeholder meetings & approvals",
+        time_pct: 25,
+        automation_score_0_100: 28,
+        timeline_horizon: "longer",
+        reasoning: "Trust and sign-off stay human for a long time.",
+      },
+    ],
     ai_risk_reasoning: "72% of marketing coordinator tasks — content drafting, reporting, campaign scheduling — overlap with what current LLMs and automation tools handle. 3 years of experience isn't deep enough specialization to offset that.",
     safeguard_tips: [
       "Own campaign outcomes (revenue, pipeline) not just the slide decks and calendar posts.",
@@ -87,29 +106,6 @@ export function createVoiceSession(): Promise<{ session_id: string }> {
     current_company: "",
     source: "voice",
   });
-}
-
-export async function scrapeLinkedIn(
-  linkedin_url: string
-): Promise<{
-  success: boolean;
-  name?: string;
-  degree?: string;
-  university?: string;
-  graduation_year?: number;
-  current_job?: string;
-  error?: string;
-}> {
-  if (DEMO_MODE) {
-    await new Promise((r) => setTimeout(r, 800));
-    return { success: false, error: "demo mode" };
-  }
-  const res = await fetch(`${API_URL}/api/scrape`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ linkedin_url }),
-  });
-  return res.json();
 }
 
 export async function getReportCard(sessionId: string) {

@@ -19,6 +19,9 @@ const KEY_LABELS: Record<string, string> = {
   estimated_tuition: "Estimated tuition",
   tuition_if_invested: "If that tuition was invested instead",
   ai_replacement_risk_0_100: "Automation / AI risk",
+  near_term_ai_risk_0_100: "Near-term AI (0–2y)",
+  career_market_stress_0_100: "Career / market stress",
+  financial_roi_stress_0_100: "Tuition ROI stress",
   overall_cooked_0_100: "Overall “how cooked” meter",
   job_market_trend: "Job market direction",
 };
@@ -42,7 +45,13 @@ function formatKeyValue(key: string, v: unknown, currencyCode: string): string {
   if (typeof v === "string") return v;
   if (typeof v !== "number" || Number.isNaN(v)) return String(v);
 
-  if (key === "ai_replacement_risk_0_100" || key === "overall_cooked_0_100") {
+  if (
+    key === "ai_replacement_risk_0_100" ||
+    key === "near_term_ai_risk_0_100" ||
+    key === "career_market_stress_0_100" ||
+    key === "financial_roi_stress_0_100" ||
+    key === "overall_cooked_0_100"
+  ) {
     return `${Math.round(v)} / 100`;
   }
   if (

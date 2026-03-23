@@ -1,17 +1,21 @@
 import asyncio
-import logging
 import os
 
+import structlog
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.services.firecrawl_service import run_research, resolve_research_query_plan
 from backend.services.money_locale import normalize_currency_code
-from backend.services.grading import compute_grade
-from backend.services.ai_job_model import compute_overall_cooked_0_100
+from backend.services.research_outcome import (
+    apply_cooked_components,
+    grade_and_report_card,
+    tuition_invested_for_api as _tuition_invested_for_api,
+)
 from backend.models import ReportCard, ResearchData, UserProfile
+from backend.session_id import ensure_session_id
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 VOICE_RESEARCH_DEADLINE_SEC = float(os.getenv("VOICE_RESEARCH_DEADLINE_SEC", "270"))
 
@@ -24,13 +28,6 @@ def _profile_blurb(p: UserProfile) -> str:
 def _truncate(s: str, n: int = 220) -> str:
     s = (s or "").strip()
     return s if len(s) <= n else s[: n - 1] + "…"
-
-
-def _tuition_invested_for_api(r: ResearchData) -> int | None:
-    """Same value the report card shows for 'If You'd Invested' / opportunity-cost column."""
-    if r.tuition_if_invested is not None:
-        return r.tuition_if_invested
-    return r.tuition_as_sp500_today
 
 
 def _voice_research_started_payload(p: UserProfile, queries: list[str]) -> dict:
@@ -69,6 +66,9 @@ def _voice_research_complete_payload(research: ResearchData, grade: str, score: 
             "estimated_tuition": research.estimated_tuition,
             "tuition_if_invested": _tuition_invested_for_api(research),
             "ai_replacement_risk_0_100": research.ai_replacement_risk_0_100,
+            "near_term_ai_risk_0_100": research.near_term_ai_risk_0_100,
+            "career_market_stress_0_100": research.career_market_stress_0_100,
+            "financial_roi_stress_0_100": research.financial_roi_stress_0_100,
             "overall_cooked_0_100": research.overall_cooked_0_100,
             "job_market_trend": research.job_market_trend,
         },
@@ -147,12 +147,13 @@ class UpdateUserProfileRequest(BaseModel):
 
 @router.post("/api/webhooks/get_user_profile")
 async def webhook_get_profile(req: WebhookRequest, request: Request):
+    ensure_session_id(req.session_id)
     store = request.app.state.store
-    session = store.get(req.session_id)
+    session = await store.get(req.session_id)
     if not session:
         return {"error": "Session not found"}
     p = session.profile
-    store.append_voice_activity(
+    await store.append_voice_activity(
         req.session_id,
         event="webhook_get_user_profile",
         title="Profile loaded",
@@ -180,16 +181,17 @@ async def webhook_get_profile(req: WebhookRequest, request: Request):
 
 @router.post("/api/webhooks/update_user_profile")
 async def webhook_update_profile(req: UpdateUserProfileRequest, request: Request):
+    ensure_session_id(req.session_id)
     store = request.app.state.store
     patch = req.model_dump(exclude={"session_id"}, exclude_unset=True)
-    if not store.patch_profile(req.session_id, patch):
+    if not await store.patch_profile(req.session_id, patch):
         return {"error": "Session not found", "ok": False}
-    session = store.get(req.session_id)
+    session = await store.get(req.session_id)
     if not session:
         return {"error": "Session not found", "ok": False}
     p = session.profile
     keys = ", ".join(sorted(patch.keys())) if patch else "(no profile fields — agent may have skipped tool args or used wrong keys)"
-    store.append_voice_activity(
+    await store.append_voice_activity(
         req.session_id,
         event="webhook_update_user_profile",
         title="Profile updated from voice" if patch else "Profile merge (empty patch)",
@@ -214,8 +216,9 @@ async def webhook_update_profile(req: UpdateUserProfileRequest, request: Request
 
 @router.post("/api/webhooks/research_degree")
 async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
+    ensure_session_id(req.session_id)
     store = request.app.state.store
-    session = store.get(req.session_id)
+    session = await store.get(req.session_id)
     if not session:
         return {
             "error": "Session not found",
@@ -233,7 +236,7 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         country_or_region=p.country_or_region,
         currency_code=p.currency_code,
     )
-    store.append_voice_activity(
+    await store.append_voice_activity(
         req.session_id,
         event="webhook_research_started",
         title="Looking up your degree story",
@@ -259,9 +262,9 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         )
     except asyncio.TimeoutError:
         logger.error(
-            "research_degree exceeded VOICE_RESEARCH_DEADLINE_SEC=%s for session %s",
-            VOICE_RESEARCH_DEADLINE_SEC,
-            req.session_id[:8],
+            "research_degree_timeout",
+            deadline_sec=VOICE_RESEARCH_DEADLINE_SEC,
+            session_prefix=req.session_id[:8],
         )
         return {
             "error": (
@@ -274,35 +277,12 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
                 "Apologize briefly, ask them to try again, and offer to retry research_degree."
             ),
         }
-    # Report card + voice must share the same money fields; refresh cooked score with current rules
-    if research.tuition_if_invested is None and research.tuition_as_sp500_today is not None:
-        research = research.model_copy(update={"tuition_if_invested": research.tuition_as_sp500_today})
-    if research.ai_replacement_risk_0_100 is not None:
-        research = research.model_copy(
-            update={
-                "overall_cooked_0_100": compute_overall_cooked_0_100(
-                    research.ai_replacement_risk_0_100,
-                    research.job_market_trend,
-                    research.estimated_tuition,
-                    _tuition_invested_for_api(research),
-                )
-            }
-        )
-    store.update_research(req.session_id, research)
+    research = apply_cooked_components(research)
+    await store.update_research(req.session_id, research)
+    grade, score, report_card = grade_and_report_card(req.session_id, p, research)
+    await store.update_report_card(req.session_id, report_card)
 
-    p = p.model_copy(update={"currency_code": research.currency_code})
-
-    grade, score = compute_grade(research, p.salary, p.years_experience)
-    report_card = ReportCard(
-        session_id=req.session_id,
-        grade=grade,
-        grade_score=score,
-        profile=p,
-        research=research,
-    )
-    store.update_report_card(req.session_id, report_card)
-
-    store.append_voice_activity(
+    await store.append_voice_activity(
         req.session_id,
         event="webhook_research_complete",
         title=f"All set — grade {grade}",
@@ -337,6 +317,9 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
             "degree_roi_rank": research.degree_roi_rank,
             "job_market_trend": research.job_market_trend,
             "ai_replacement_risk_0_100": research.ai_replacement_risk_0_100,
+            "near_term_ai_risk_0_100": research.near_term_ai_risk_0_100,
+            "career_market_stress_0_100": research.career_market_stress_0_100,
+            "financial_roi_stress_0_100": research.financial_roi_stress_0_100,
             "overall_cooked_0_100": research.overall_cooked_0_100,
             "grade": grade,
             "grade_score": score,
@@ -370,7 +353,11 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         # AI risk
         "ai_replacement_risk_0_100": research.ai_replacement_risk_0_100,
         "ai_risk_reasoning": research.ai_risk_reasoning,
+        "near_term_ai_risk_0_100": research.near_term_ai_risk_0_100,
+        "career_market_stress_0_100": research.career_market_stress_0_100,
+        "financial_roi_stress_0_100": research.financial_roi_stress_0_100,
         "overall_cooked_0_100": research.overall_cooked_0_100,
+        "job_task_exposure": [t.model_dump() for t in research.job_task_exposure],
         # Analysis
         "safeguard_tips": research.safeguard_tips,
         "honest_take": research.honest_take,
@@ -386,9 +373,10 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
 
 @router.post("/api/webhooks/save_roast_quote")
 async def webhook_save_quote(req: SaveQuoteRequest, request: Request):
+    ensure_session_id(req.session_id)
     store = request.app.state.store
-    store.update_roast_quote(req.session_id, req.quote)
-    store.append_voice_activity(
+    await store.update_roast_quote(req.session_id, req.quote)
+    await store.append_voice_activity(
         req.session_id,
         event="webhook_save_roast_quote",
         title="Your best line is saved",

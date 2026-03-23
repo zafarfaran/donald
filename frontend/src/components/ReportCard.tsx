@@ -10,6 +10,14 @@ interface ResearchSourceRow {
   topic: string;
 }
 
+interface JobTaskExposureRow {
+  task: string;
+  time_pct: number;
+  automation_score_0_100: number;
+  reasoning?: string;
+  timeline_horizon?: string;
+}
+
 interface ReportCardData {
   session_id: string; grade: string; grade_score: number;
   profile: {
@@ -32,7 +40,11 @@ interface ReportCardData {
     job_market_trend: string | null;
     ai_replacement_risk_0_100?: number | null;
     ai_risk_reasoning?: string;
+    near_term_ai_risk_0_100?: number | null;
+    career_market_stress_0_100?: number | null;
+    financial_roi_stress_0_100?: number | null;
     overall_cooked_0_100?: number | null;
+    job_task_exposure?: JobTaskExposureRow[];
     safeguard_tips?: string[];
     honest_take?: string;
     methodology_note?: string;
@@ -54,6 +66,17 @@ function fmtMoney(n: number | null | undefined, currency = "USD") {
   } catch {
     return `${Number(n).toLocaleString()} ${code}`;
   }
+}
+
+function horizonShort(h: string | undefined): string {
+  const m: Record<string, string> = {
+    now: "Now",
+    "1_2_years": "1–2y",
+    "3_5_years": "3–5y",
+    longer: "Longer",
+  };
+  if (!h) return "—";
+  return m[h] ?? h;
 }
 
 function RiskMeter({ label, value }: { label: string; value: number }) {
@@ -99,7 +122,11 @@ export default function ReportCard({ data }: { data: ReportCardData }) {
   ];
 
   const aiRisk = data.research.ai_replacement_risk_0_100;
+  const nearTermAi = data.research.near_term_ai_risk_0_100;
+  const careerStress = data.research.career_market_stress_0_100;
+  const financialStress = data.research.financial_roi_stress_0_100;
   const cooked = data.research.overall_cooked_0_100;
+  const taskRows = (data.research.job_task_exposure ?? []).filter((t) => t.task?.trim());
   const tips = (data.research.safeguard_tips ?? []).slice(0, 3);
   const namedSources = (data.research.named_sources ?? []).filter(Boolean).slice(0, 5);
   const sourceRows = (data.research.sources ?? []).filter((s) => s.title || s.url);
@@ -168,14 +195,26 @@ export default function ReportCard({ data }: { data: ReportCardData }) {
         </motion.div>
       )}
 
-      {(aiRisk != null || cooked != null) && (
+      {(aiRisk != null ||
+        nearTermAi != null ||
+        careerStress != null ||
+        financialStress != null ||
+        cooked != null) && (
         <motion.div initial={{ opacity: 0 }} animate={show ? { opacity: 1 } : {}} transition={{ delay: 1.25 }}
           className="px-7 py-5 border-t border-white/5 text-left">
-          <p className="text-[10px] font-semibold tracking-wider uppercase text-[var(--subtle)] mb-3">Job + AI exposure</p>
-          {aiRisk != null && <RiskMeter label="AI replace risk" value={aiRisk} />}
+          <p className="text-[10px] font-semibold tracking-wider uppercase text-[var(--subtle)] mb-3">Exposure + stress</p>
+          {aiRisk != null && <RiskMeter label="AI exposure" value={aiRisk} />}
+          {nearTermAi != null && <RiskMeter label="Near-term AI (0–2y horizon)" value={nearTermAi} />}
+          {careerStress != null && <RiskMeter label="Career / market stress" value={careerStress} />}
+          {financialStress != null && <RiskMeter label="Tuition ROI stress" value={financialStress} />}
           {cooked != null && <RiskMeter label="Overall cooked" value={cooked} />}
+          {cooked != null && (careerStress != null || financialStress != null) && (
+            <p className="text-[9px] text-[var(--subtle)]/70 mt-2 leading-relaxed">
+              Cooked ≈ 55% AI + 25% market + 20% tuition stress (bars above).
+            </p>
+          )}
           {data.research.ai_risk_reasoning && (
-            <p className="text-[var(--subtle)] text-[10px] mt-2.5 leading-relaxed italic line-clamp-3">
+            <p className="text-[var(--subtle)] text-[10px] mt-2.5 leading-relaxed italic line-clamp-5">
               {data.research.ai_risk_reasoning}
             </p>
           )}
@@ -184,6 +223,27 @@ export default function ReportCard({ data }: { data: ReportCardData }) {
               Higher = worse. Based on role, experience, and market signals.
             </p>
           )}
+        </motion.div>
+      )}
+
+      {taskRows.length > 0 && (
+        <motion.div initial={{ opacity: 0 }} animate={show ? { opacity: 1 } : {}} transition={{ delay: 1.28 }}
+          className="px-7 py-4 border-t border-white/5 text-left">
+          <p className="text-[10px] font-semibold tracking-wider uppercase text-[var(--subtle)] mb-2.5">Task breakdown</p>
+          <ul className="space-y-2.5">
+            {taskRows.map((t, i) => (
+              <li key={i} className="text-[10px] leading-snug border-l border-[var(--gold)]/35 pl-2.5">
+                <span className="text-[var(--fg)]/95 font-medium">{t.task}</span>
+                <span className="text-[var(--subtle)]/80">
+                  {" "}
+                  · {t.time_pct}% · exposure {t.automation_score_0_100}/100 · {horizonShort(t.timeline_horizon)}
+                </span>
+                {t.reasoning?.trim() ? (
+                  <p className="text-[var(--subtle)]/75 font-light mt-0.5 line-clamp-3">{t.reasoning}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         </motion.div>
       )}
 

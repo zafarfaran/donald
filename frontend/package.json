@@ -6,10 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "vercel": "vercel",
+    "vercel:deploy": "vercel deploy",
+    "vercel:prod": "vercel deploy --prod"
   },
   "dependencies": {
+    "firebase": "^11.6.0",
     "@elevenlabs/react": "^0.14.3",
+    "@sentry/nextjs": "^10.45.0",
     "@vercel/og": "^0.11.1",
     "framer-motion": "^12.38.0",
     "next": "16.2.1",
@@ -23,6 +28,7 @@
     "@types/react-dom": "^19",
     "patch-package": "^8.0.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vercel": "^41.0.0"
   }
 }

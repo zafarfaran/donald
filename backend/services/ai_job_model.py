@@ -1,100 +1,36 @@
 """
-Heuristics for AI replacement risk, overall 'cooked' score, and safeguard tips.
-Uses job title + search snippets + experience. No extra API keys required.
+Scoring helpers: task-based AI exposure, career/market stress, financial ROI stress,
+and composite overall “cooked”. AI replacement risk is primarily from Claude; when
+`tasks` are provided, we derive a time-weighted score in Python.
 """
 
 from __future__ import annotations
 
-import re
+from typing import Any
 
-# Rough baseline: how automatable typical tasks for this role family are (0 = safer, 100 = very exposed)
-_ROLE_KEYWORDS: list[tuple[list[str], int]] = [
-    (["data entry", "transcription", "call center", "telemarketer", "cashier"], 88),
-    (["paralegal", "legal assistant", "bookkeeper", "payroll clerk", "accounting clerk"], 78),
-    (["customer service", "support agent", "help desk", "receptionist"], 72),
-    (["journalist", "reporter", "copywriter", "content writer", "social media"], 68),
-    (["marketing", "seo", "graphic design", "designer"], 62),
-    (["analyst", "financial analyst", "research analyst"], 58),
-    (["software", "developer", "engineer", "programmer"], 55),
-    (["hr ", "recruiter", "human resources"], 52),
-    (["sales", "account executive", "bd "], 48),
-    (["teacher", "professor", "instructor"], 42),
-    (["nurse", "rn ", "therapist", "counselor", "social worker"], 35),
-    (["electrician", "plumber", "hvac", "welder", "mechanic"], 28),
-    (["surgeon", "physician", "doctor", "dentist"], 22),
-]
+from backend.models import JobTaskExposure
 
-_HIGH_RISK_PHRASES = [
-    "high risk of automation",
-    "likely to be automated",
-    "replaced by ai",
-    "replaced by chatgpt",
-    "generative ai",
-    "already automating",
-    "job losses from ai",
-    "vulnerable to automation",
-    "routine tasks automated",
-]
+# Horizons treated as “near term” for a separate meter (0–2y vibe)
+_NEAR_TERM_HORIZONS = frozenset({"now", "1_2_years"})
 
-_LOWER_RISK_PHRASES = [
-    "low risk of automation",
-    "difficult to automate",
-    "human judgment",
-    "requires empathy",
-    "physical presence",
-    "hands-on",
-    "creative work",
-    "strategic role",
-    "regulated profession",
-]
+# Pessimistic lift for headline AI exposure: routine / junior / rules-heavy work should read harshly.
+# Maps each raw 0–100 score upward (strongest effect in the mid band), capped at 100.
+_HARSH_LIFT_RATIO = 0.18
+_HARSH_FLOOR_BUMP = 5
 
 
-def _baseline_risk_from_job_title(job_title: str) -> int:
-    j = job_title.lower().strip()
-    if not j:
-        return 55
-    for keywords, risk in _ROLE_KEYWORDS:
-        if any(k in j for k in keywords):
-            return risk
-    return 52
-
-
-def _snippet_adjustment(combined_text: str) -> int:
-    """Delta roughly in [-18, 18] added to baseline risk."""
-    if not combined_text:
-        return 0
-    t = combined_text.lower()
-    high = sum(1 for p in _HIGH_RISK_PHRASES if p in t)
-    low = sum(1 for p in _LOWER_RISK_PHRASES if p in t)
-    # Extra weight if "automation" and "risk" co-occur near each other
-    if re.search(r"automation.{0,40}risk|risk.{0,40}automation", t):
-        high += 1
-    return min(18, max(-18, high * 6 - low * 5))
-
-
-def adjust_risk_for_experience(risk_0_100: int, years: int | None) -> int:
-    """Junior roles often have more routine tasks; seniority adds tacit judgment."""
-    if years is None:
-        return risk_0_100
-    y = max(0, min(years, 40))
-    if y <= 2:
-        return min(100, risk_0_100 + 8)
-    if y <= 5:
-        return risk_0_100
-    if y <= 12:
-        return max(0, risk_0_100 - 5)
-    return max(0, risk_0_100 - 12)
-
-
-def infer_ai_replacement_risk(
-    job_title: str,
-    combined_snippets: str,
-    years_experience: int | None,
-) -> int:
-    base = _baseline_risk_from_job_title(job_title)
-    adjusted = base + _snippet_adjustment(combined_snippets)
-    adjusted = adjust_risk_for_experience(adjusted, years_experience)
-    return max(0, min(100, adjusted))
+def harsh_calibrate_automation_0_100(raw: int) -> int:
+    """
+    Pull automation exposure scores up — models real-world pessimism (tools ship fast,
+    employers automate junior layers first, rules-based workflows are easy targets).
+    """
+    try:
+        x = int(raw)
+    except (TypeError, ValueError):
+        x = 50
+    x = max(0, min(100, x))
+    lifted = x + (100 - x) * _HARSH_LIFT_RATIO + _HARSH_FLOOR_BUMP
+    return max(0, min(100, int(round(lifted))))
 
 
 def _trend_stress_0_100(job_market_trend: str | None) -> int:
@@ -107,7 +43,7 @@ def _trend_stress_0_100(job_market_trend: str | None) -> int:
     return 50
 
 
-def _financial_stress_0_100(
+def compute_financial_roi_stress_0_100(
     estimated_tuition: int | None,
     tuition_if_invested: int | None,
 ) -> int:
@@ -122,86 +58,169 @@ def _financial_stress_0_100(
     return min(100, int(35 + ratio * 25))
 
 
+def compute_career_market_stress_0_100(
+    job_market_trend: str | None,
+    unemployment_rate_pct: float | None,
+) -> int:
+    """
+    Higher = worse (stagnation / headwinds). Blends trend with optional unemployment nudge.
+    """
+    base = _trend_stress_0_100(job_market_trend)
+    if unemployment_rate_pct is None:
+        return base
+    u = float(unemployment_rate_pct)
+    if u <= 6:
+        return base
+    bump = min(18, int((u - 6) * 2.2))
+    return min(100, base + bump)
+
+
+def compute_overall_cooked_from_components(
+    ai_replacement_risk_0_100: int,
+    career_market_stress_0_100: int,
+    financial_roi_stress_0_100: int,
+) -> int:
+    """
+    Composite cooked: 55% AI exposure + 25% career/market stress + 20% financial stress.
+    If AI risk > 70, overall cooked is at least that value.
+    """
+    raw = (
+        0.55 * ai_replacement_risk_0_100
+        + 0.25 * career_market_stress_0_100
+        + 0.20 * financial_roi_stress_0_100
+    )
+    out = max(0, min(100, int(round(raw))))
+    if ai_replacement_risk_0_100 > 70:
+        out = max(out, ai_replacement_risk_0_100)
+    return out
+
+
 def compute_overall_cooked_0_100(
     ai_replacement_risk_0_100: int,
     job_market_trend: str | None,
     estimated_tuition: int | None,
     tuition_if_invested: int | None,
+    unemployment_rate_pct: float | None = None,
 ) -> int:
-    """
-    Single 'how cooked' number: job+AI exposure, market, and tuition regret.
-    Higher = worse position.
-    Strict band: AI replacement above 70% means you're at least that 'cooked' on the meter.
-    """
-    t = _trend_stress_0_100(job_market_trend)
-    f = _financial_stress_0_100(estimated_tuition, tuition_if_invested)
-    raw = 0.55 * ai_replacement_risk_0_100 + 0.25 * t + 0.20 * f
-    out = max(0, min(100, int(round(raw))))
-    if ai_replacement_risk_0_100 > 70:
-        # Never show 'overall cooked' below AI risk when automation exposure is high
-        out = max(out, ai_replacement_risk_0_100)
-    return out
-
-
-def build_safeguard_tips(
-    job_title: str,
-    degree: str,
-    ai_risk_0_100: int,
-    years_experience: int | None,
-) -> list[str]:
-    """Actionable, non-legal-advice suggestions tailored to risk band."""
-    tips: list[str] = []
-    j = job_title.strip() or "your role"
-    d = degree.strip() or "your field"
-
-    if ai_risk_0_100 >= 70:
-        tips.append(
-            f"Treat {j} as a stack: document what only you decide (judgment, stakeholders, edge cases) and push everything else into repeatable playbooks."
-        )
-        tips.append(
-            "Pick one AI tool you actually ship with weekly (not just ChatGPT) — prompts, evals, and review — so you become the person who automates the work, not the one replaced by it."
-        )
-        tips.append(
-            f"Add a scarce combo: {d} + domain depth (industry cert, regulated context, or revenue ownership) so you're harder to swap for a generic model."
-        )
-    elif ai_risk_0_100 >= 45:
-        tips.append(
-            "Move up the value chain: own outcomes (pipeline, P&L, launches) not just outputs (docs, tickets, slides)."
-        )
-        tips.append(
-            "Build a public or internal portfolio of before/after work where AI sped you up — proof you multiply output."
-        )
-        tips.append(
-            "Schedule a quarterly 'task audit': list what you do monthly and tag each as automate / augment / human-only."
-        )
-    else:
-        tips.append(
-            "Still worth automating your own busywork — frees time for higher-leverage problems only you can take."
-        )
-        tips.append(
-            "Keep a living skills map for your team: who covers judgment, compliance, and client trust when tools change."
-        )
-
-    if years_experience is not None and years_experience < 4:
-        tips.append(
-            "Early-career: prioritize mentorship paths and roles where you touch customers, decisions, or production systems — not only task queues."
-        )
-    else:
-        tips.append(
-            "Leverage experience: write short decision memos or runbooks others follow — that's leverage AI can't copy without you."
-        )
-
-    tips.append(
-        "Follow one serious source on AI + labor in your industry (reports, regulator notes, or union/pro society briefs) — narratives move faster than models."
-    )
-    return tips[:6]
+    """Backward-compatible wrapper using the same component blend."""
+    c = compute_career_market_stress_0_100(job_market_trend, unemployment_rate_pct)
+    f = compute_financial_roi_stress_0_100(estimated_tuition, tuition_if_invested)
+    return compute_overall_cooked_from_components(ai_replacement_risk_0_100, c, f)
 
 
 def financial_opportunity_gap(
     estimated_tuition: int | None,
     tuition_if_invested: int | None,
 ) -> int | None:
-    """How much more you'd have had if tuition went to markets (same formula as UI narrative)."""
     if estimated_tuition is None or tuition_if_invested is None:
         return None
     return tuition_if_invested - estimated_tuition
+
+
+def _normalize_time_weights(raw: list[dict[str, Any]]) -> list[tuple[float, dict[str, Any]]]:
+    """Return (normalized_weight_0_1, task_dict) per row; weights sum to 1."""
+    weights: list[float] = []
+    rows: list[dict[str, Any]] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        try:
+            pct = int(d.get("time_pct") or 0)
+        except (TypeError, ValueError):
+            pct = 0
+        pct = max(0, min(100, pct))
+        if pct <= 0:
+            continue
+        weights.append(float(pct))
+        rows.append(d)
+    s = sum(weights)
+    if s <= 0:
+        return []
+    return [(w / s, r) for w, r in zip(weights, rows)]
+
+
+def compute_task_based_ai_metrics(
+    raw_tasks: list[dict[str, Any]],
+) -> tuple[int | None, int | None, list[JobTaskExposure]]:
+    """
+    Time-weighted automation exposure from task decomposition.
+    Returns (overall_0_100, near_term_0_100 or None, validated task rows).
+    """
+    if not raw_tasks:
+        return None, None, []
+
+    normed = _normalize_time_weights(raw_tasks)
+    if not normed:
+        return None, None, []
+
+    out_models: list[JobTaskExposure] = []
+    overall = 0.0
+    near_num = 0.0
+    near_den = 0.0
+
+    for w, d in normed:
+        try:
+            score = int(d.get("automation_score_0_100", 50))
+        except (TypeError, ValueError):
+            score = 50
+        score = harsh_calibrate_automation_0_100(score)
+        hz = str(d.get("timeline_horizon") or "longer").strip().lower()
+        if hz not in ("now", "1_2_years", "3_5_years", "longer"):
+            hz = "longer"
+        task_label = str(d.get("task") or "")[:500]
+        reason = str(d.get("reasoning") or "")[:1200]
+        try:
+            tp = int(d.get("time_pct") or 0)
+        except (TypeError, ValueError):
+            tp = 0
+        tp = max(0, min(100, tp))
+        out_models.append(
+            JobTaskExposure(
+                task=task_label,
+                time_pct=tp,
+                automation_score_0_100=score,
+                reasoning=reason,
+                timeline_horizon=hz,
+            )
+        )
+        overall += w * score
+        if hz in _NEAR_TERM_HORIZONS:
+            near_num += w * score
+            near_den += w
+
+    o = int(round(max(0, min(100, overall))))
+    near: int | None
+    if near_den > 0:
+        near = int(round(max(0, min(100, near_num / near_den))))
+    else:
+        near = None
+    return o, near, out_models
+
+
+def resolve_ai_replacement_from_llm(
+    ai_from_llm: int,
+    ai_risk_reasoning: str,
+    raw_tasks: list[dict[str, Any]] | None,
+) -> tuple[int, str, list[JobTaskExposure], int | None]:
+    """
+    If tasks are present and valid, override scalar AI risk with the weighted task score.
+    """
+    if not raw_tasks:
+        harsh_scalar = harsh_calibrate_automation_0_100(ai_from_llm)
+        note = f"Pessimism-calibrated AI exposure (no task list): {harsh_scalar}/100."
+        merged = f"{note}\n{ai_risk_reasoning}".strip() if ai_risk_reasoning else note
+        return harsh_scalar, merged, [], None
+
+    overall, near, models = compute_task_based_ai_metrics(raw_tasks)
+    if overall is None:
+        harsh_scalar = harsh_calibrate_automation_0_100(ai_from_llm)
+        note = f"Pessimism-calibrated AI exposure (tasks invalid; scalar fallback): {harsh_scalar}/100."
+        merged = f"{note}\n{ai_risk_reasoning}".strip() if ai_risk_reasoning else note
+        return harsh_scalar, merged, [], None
+
+    note = (
+        f"Composite AI exposure (time-weighted, pessimism-calibrated from {len(models)} tasks): "
+        f"{overall}/100."
+    )
+    merged = f"{note}\n{ai_risk_reasoning}".strip() if ai_risk_reasoning else note
+    return overall, merged, models, near

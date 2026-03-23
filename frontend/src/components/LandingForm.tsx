@@ -3,12 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { createSession, scrapeLinkedIn } from "@/lib/api";
+import { createSession } from "@/lib/api";
 
 export default function LandingForm() {
   const router = useRouter();
-  const [mode, setMode] = useState<"choice" | "linkedin" | "manual">("choice");
-  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [mode, setMode] = useState<"choice" | "manual">("choice");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -18,30 +17,6 @@ export default function LandingForm() {
     salary: undefined as number | undefined,
     years_experience: undefined as number | undefined,
   });
-
-  const handleLinkedIn = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await scrapeLinkedIn(linkedinUrl);
-      if (!result.success) {
-        setError("Even LinkedIn doesn\u2019t want to show me your profile. Sad! Enter it yourself.");
-        setMode("manual");
-        setLoading(false);
-        return;
-      }
-      const session = await createSession({
-        name: result.name || "", degree: result.degree || "",
-        university: result.university || "", graduation_year: result.graduation_year || 2020,
-        current_job: result.current_job || "", source: "linkedin",
-      });
-      router.push(`/roast?session=${session.session_id}`);
-    } catch {
-      setError("Something broke. Tremendous failure. Try entering your info manually.");
-      setMode("manual");
-    }
-    setLoading(false);
-  };
 
   const handleManual = async () => {
     setLoading(true);
@@ -65,27 +40,11 @@ export default function LandingForm() {
       <AnimatePresence mode="wait">
         {mode === "choice" && (
           <motion.div key="choice" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.3 }} className="flex flex-col gap-3">
-            <motion.button onClick={() => setMode("linkedin")} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-              className="w-full py-3.5 bg-[var(--gold)] text-black font-semibold text-sm rounded-xl hover:bg-[var(--gold-dim)] transition-colors glow-gold">
-              Paste LinkedIn URL
-            </motion.button>
             <motion.button onClick={() => setMode("manual")} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               className="w-full py-3.5 bg-[var(--card)] border border-white/10 font-semibold text-sm rounded-xl hover:bg-[var(--card-hover)] hover:border-white/20 transition-all">
               I&apos;ll Enter My Info
             </motion.button>
             <p className="text-center text-[var(--subtle)] text-xs mt-1">We don&apos;t store your data. Donald has bigger things to remember.</p>
-          </motion.div>
-        )}
-
-        {mode === "linkedin" && (
-          <motion.div key="linkedin" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={{ duration: 0.3 }} className="flex flex-col gap-3">
-            <input type="url" placeholder="https://linkedin.com/in/your-profile" value={linkedinUrl}
-              onChange={(e) => setLinkedinUrl(e.target.value)} className={input} autoFocus />
-            <button onClick={handleLinkedIn} disabled={loading || !linkedinUrl}
-              className="w-full py-3.5 bg-[var(--gold)] text-black font-semibold text-sm rounded-xl hover:bg-[var(--gold-dim)] transition-colors glow-gold disabled:opacity-40">
-              {loading ? "Investigating your mistakes..." : "Let Donald See"}
-            </button>
-            <button onClick={() => setMode("manual")} className="text-[var(--subtle)] text-xs hover:text-[var(--fg)] transition-colors">Or enter manually</button>
           </motion.div>
         )}
 
