@@ -297,7 +297,7 @@ def _parse_analysis_dict(d: dict) -> LLMAnalysis:
 # ── Agentic research ─────────────────────────────────────────────────────────
 
 _AGENTIC_SYSTEM = """\
-You are an expert career + financial analyst building a brutally honest "degree roast" report card.
+You are an expert career + financial analyst building a **maximally harsh** "degree roast" report card — sharp, quotable, uncomfortable truth. Punch up: weak ROI, automation exposure, and tuition pain. No sugarcoating.
 
 You have two tools:
 - **web_search** — search the web for real data. Be targeted and efficient.
@@ -331,9 +331,10 @@ The backend **time-weights** `tasks` and applies a small pessimism calibration �
 ## Extraction rules
 - ALL money integers must be in the user's PRIMARY CURRENCY, major units only (dollars not cents, pounds not pence).
 - Extract from search results only — do not invent numbers. Use null when data is missing.
+- If the profile lists a **user-reported total tuition** integer, `estimated_tuition` in submit_analysis **must equal that exact integer** (canonical). Still run web_search for published fees/tuition to inform honest_take and contrast.
 - Self-reported salary is internal context only — NEVER put it in honest_take.
 - For sp500_annual_return_pct: use the annualized total return for the benchmark named in the profile or found in search results. If you cannot find it, use a reasonable long-run nominal average for that market (~10–11% US, ~7–9% UK/EU).
-- honest_take: 2–4 quotable sentences with correct currency symbols. Mention tuition vs index opportunity cost when tuition data exists. If user hasn't graduated yet, use forward-looking language.
+- honest_take: 2–4 quotable sentences with correct currency symbols — **meaner and funnier** than a neutral analyst, but still factual. Mention tuition vs index opportunity cost when tuition data exists. If the user reported a tuition total, treat that as the real tuition story (still cite market context from search when useful). If user hasn't graduated yet, use forward-looking language.
 - safeguard_tips: 4–6 specific, actionable tips for THIS person ordered by impact (highest first). Reference their exact role, degree, experience. No generic advice.
 """
 
@@ -351,6 +352,7 @@ def _build_agentic_user_message(
     money_locale: str,
     equity_benchmark: str,
     max_searches: int,
+    user_tuition_total: int | None = None,
 ) -> str:
     current_year = datetime.now().year
     _, years_since_grad = grad_timeline(graduation_year, current_year)
@@ -370,6 +372,13 @@ def _build_agentic_user_message(
 
     region_line = (country_or_region or "").strip() or "not specified"
     salary_line = format_money_int(salary, currency_code) if salary else "not disclosed"
+    if user_tuition_total and user_tuition_total > 0:
+        tuition_line = (
+            f"{user_tuition_total} {currency_code} (user-reported total degree cost — **canonical** for submit_analysis `estimated_tuition`; "
+            "still search the web for published fees/tuition as context and for honest_take contrast if it differs)"
+        )
+    else:
+        tuition_line = "not provided — extract estimated total tuition/fees from search only"
 
     return (
         f"## Profile\n"
@@ -381,6 +390,7 @@ def _build_agentic_user_message(
         f"Country / region: {region_line}\n"
         f"Primary currency (ISO 4217): {currency_code}\n"
         f"Self-reported salary: {salary_line}\n"
+        f"User-reported tuition (total): {tuition_line}\n"
         f"Search locale: {money_locale}\n"
         f"Equity benchmark: {equity_benchmark}\n\n"
         f"Search strategically — you have at most {max_searches} web_search calls. Go."
@@ -421,6 +431,7 @@ async def agentic_research(
     currency_code: str = "USD",
     money_locale: str = "US",
     equity_benchmark: str = "S&P 500",
+    user_tuition_total: int | None = None,
 ) -> AgenticResult | None:
     """
     Claude-driven research loop.  Claude picks search queries, reads results,
@@ -451,6 +462,7 @@ async def agentic_research(
         money_locale=money_locale,
         equity_benchmark=equity_benchmark,
         max_searches=max_searches,
+        user_tuition_total=user_tuition_total,
     )
 
     messages: list[dict] = [{"role": "user", "content": user_msg}]
@@ -578,6 +590,7 @@ def _build_prompt(
     currency_code: str,
     money_locale: str,
     equity_benchmark: str,
+    user_tuition_total: int | None = None,
 ) -> str:
     current_year = datetime.now().year
     _, years_since_grad = grad_timeline(graduation_year, current_year)
@@ -597,6 +610,13 @@ def _build_prompt(
 
     region_line = (country_or_region or "").strip() or "not specified"
     salary_line = f"Self-reported salary ({currency_code}): {format_money_int(salary, currency_code)}"
+    if user_tuition_total and user_tuition_total > 0:
+        tuition_profile = (
+            f"User-reported total tuition ({currency_code}): {user_tuition_total} — use this EXACT integer as "
+            f"`estimated_tuition` in submit_analysis (canonical). Still extract/compare published fees from snippets for honest_take.\n"
+        )
+    else:
+        tuition_profile = "User-reported tuition: not provided — estimate total tuition from snippets only.\n"
 
     profile_block = (
         f"Degree: {degree}\n"
@@ -607,6 +627,7 @@ def _build_prompt(
         f"Country / region (user or agent): {region_line}\n"
         f"PRIMARY CURRENCY (ISO 4217): {currency_code} — ALL extracted money integers MUST be in this currency, major units only (pounds not pence, dollars not cents).\n"
         f"{salary_line}\n"
+        f"{tuition_profile}"
         f"Search locale bucket: {money_locale} — prefer local sources (e.g. ONS/Reed for UK, BLS for US).\n"
         f"Equity benchmark for opportunity-cost narrative: {equity_benchmark} (use snippets; field name in tool is still sp500_annual_return_pct).\n"
     )
@@ -644,6 +665,7 @@ def _build_prompt(
         "7. Safeguard tips: 4–6 specific actions for this person.\n\n"
         "### Honest take\n"
         "8. 2–4 sentences with correct currency symbols (£ $ € …) matching PRIMARY CURRENCY. "
+        "Tone: **harsher roast energy** — punchy and quotable, not dry. "
         "Reference market averages only — NEVER self-reported salary. "
         f"Mention tuition vs \"if that went into {equity_benchmark}\" style opportunity cost when tuition exists. "
         "If they are NOT graduated yet, use forward-looking language (typical starting pay, whether the field is heating up, "
@@ -679,6 +701,7 @@ async def analyze_with_llm(
     currency_code: str = "USD",
     money_locale: str = "US",
     equity_benchmark: str = "S&P 500",
+    user_tuition_total: int | None = None,
 ) -> LLMAnalysis | None:
     client = _get_client()
     if client is None:
@@ -697,6 +720,7 @@ async def analyze_with_llm(
         currency_code=currency_code,
         money_locale=money_locale,
         equity_benchmark=equity_benchmark,
+        user_tuition_total=user_tuition_total,
     )
 
     model = (os.getenv("ANTHROPIC_ANALYSIS_MODEL") or "claude-haiku-4-5").strip()

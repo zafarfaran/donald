@@ -34,6 +34,8 @@ def run_session_research(self, session_id: str, profile_dict: dict) -> dict:
             salary=p.salary,
             country_or_region=p.country_or_region,
             currency_code=p.currency_code,
+            tuition_paid=p.tuition_paid,
+            tuition_is_total=p.tuition_is_total,
         )
 
     try:

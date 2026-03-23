@@ -25,6 +25,20 @@ def _profile_blurb(p: UserProfile) -> str:
     return " · ".join(parts)
 
 
+def _voice_research_profile_errors(p: UserProfile) -> str | None:
+    """Light validation so the agent gets a spoken retry message."""
+    if not (p.degree or "").strip():
+        return "Missing degree — ask what they studied, then call research_degree again."
+    if not (p.university or "").strip():
+        return "Missing school or university — ask where they studied, then call research_degree again."
+    if not (p.current_job or "").strip():
+        return (
+            "Missing current situation — ask their job title, student status, or what they're aiming for, "
+            "then call research_degree again."
+        )
+    return None
+
+
 def _truncate(s: str, n: int = 220) -> str:
     s = (s or "").strip()
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -43,6 +57,8 @@ def _voice_research_started_payload(p: UserProfile, queries: list[str]) -> dict:
             "current_job": p.current_job,
             "currency_code": p.currency_code,
             "country_or_region": p.country_or_region,
+            "tuition_paid": p.tuition_paid,
+            "tuition_is_total": p.tuition_is_total,
         },
     }
 
@@ -64,6 +80,7 @@ def _voice_research_complete_payload(research: ResearchData, grade: str, score: 
             "avg_salary_for_role": research.avg_salary_for_role,
             "median_salary_for_role": research.median_salary_for_role,
             "estimated_tuition": research.estimated_tuition,
+            "tuition_web_estimate": research.tuition_web_estimate,
             "tuition_if_invested": _tuition_invested_for_api(research),
             "ai_replacement_risk_0_100": research.ai_replacement_risk_0_100,
             "near_term_ai_risk_0_100": research.near_term_ai_risk_0_100,
@@ -96,6 +113,8 @@ class ResearchProfilePayload(BaseModel):
     years_experience: int | None = Field(None, alias="yearsExperience")
     country_or_region: str = Field("", alias="countryOrRegion")
     currency_code: str = Field("USD", alias="currencyCode")
+    tuition_paid: int | None = Field(None, alias="tuitionPaid")
+    tuition_is_total: bool = Field(True, alias="tuitionIsTotal")
     source: str = "voice"
 
     @field_validator("currency_code", mode="before")
@@ -111,6 +130,36 @@ class ResearchProfilePayload(BaseModel):
         if v is None:
             return ""
         return str(v).strip()
+
+    @field_validator("tuition_paid", mode="before")
+    @classmethod
+    def _coerce_tuition(cls, v: object) -> int | None:
+        if v is None or v == "":
+            return None
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, int):
+            return v if v > 0 else None
+        s = str(v).strip().replace(",", "")
+        if not s:
+            return None
+        try:
+            n = int(float(s))
+        except ValueError:
+            return None
+        return n if n > 0 else None
+
+    @field_validator("tuition_is_total", mode="before")
+    @classmethod
+    def _coerce_tuition_is_total(cls, v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None or v == "":
+            return True
+        s = str(v).strip().lower()
+        if s in {"false", "0", "no", "annual", "per year", "yearly"}:
+            return False
+        return True
 
     def to_user_profile(self) -> UserProfile:
         return UserProfile(**self.model_dump(by_alias=False))
@@ -142,6 +191,8 @@ class UpdateUserProfileRequest(BaseModel):
     years_experience: int | None = Field(None, alias="yearsExperience")
     country_or_region: str | None = Field(None, alias="countryOrRegion")
     currency_code: str | None = Field(None, alias="currencyCode")
+    tuition_paid: int | None = Field(None, alias="tuitionPaid")
+    tuition_is_total: bool | None = Field(None, alias="tuitionIsTotal")
     source: str | None = None
 
 
@@ -227,6 +278,12 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         }
 
     p = req.profile.to_user_profile()
+    if err := _voice_research_profile_errors(p):
+        return {
+            "error": err,
+            "research_complete": False,
+            "agent_note": err,
+        }
     # Privacy: voice flow does not merge into session.profile; only report_card holds a snapshot for the UI.
     rq, _, _, _ = resolve_research_query_plan(
         p.degree,
@@ -257,6 +314,8 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
                 salary=p.salary,
                 country_or_region=p.country_or_region,
                 currency_code=p.currency_code,
+                tuition_paid=p.tuition_paid,
+                tuition_is_total=p.tuition_is_total,
             ),
             timeout=VOICE_RESEARCH_DEADLINE_SEC,
         )
@@ -307,6 +366,7 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         "report_numbers": {
             "currency_code": research.currency_code,
             "estimated_tuition": research.estimated_tuition,
+            "tuition_web_estimate": research.tuition_web_estimate,
             "tuition_if_invested": _tuition_invested_for_api(research),
             "tuition_opportunity_gap": research.tuition_opportunity_gap,
             "avg_salary_for_degree": research.avg_salary_for_degree,
@@ -332,18 +392,15 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         "median_salary_for_role": research.median_salary_for_role,
         "salary_range_low": research.salary_range_low,
         "salary_range_high": research.salary_range_high,
-        # Tuition + S&P 500 financial model (aliases + canonical names = report card JSON)
-        "tuition_estimated": research.estimated_tuition,
-        "tuition_if_invested_in_sp500": _tuition_invested_for_api(research),
+        # Tuition + S&P 500 financial model (canonical fields only)
         "estimated_tuition": research.estimated_tuition,
+        "tuition_web_estimate": research.tuition_web_estimate,
         "tuition_if_invested": _tuition_invested_for_api(research),
         "tuition_opportunity_gap": research.tuition_opportunity_gap,
         "sp500_annual_return_pct": research.sp500_annual_return_pct,
         "sp500_total_return_pct": research.sp500_total_return_pct,
         "years_since_graduation": research.years_since_graduation,
         # Career
-        "roi_rank": research.degree_roi_rank,
-        "job_trend": research.job_market_trend,
         "degree_roi_rank": research.degree_roi_rank,
         "job_market_trend": research.job_market_trend,
         "unemployment_rate_pct": research.unemployment_rate_pct,

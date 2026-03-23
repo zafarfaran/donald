@@ -52,6 +52,15 @@ class UserProfile(BaseModel):
         default="USD",
         description="ISO 4217: USD, GBP, EUR, etc. All salary/tuition integers use this currency.",
     )
+    # Voice / forms: total degree cost the user states (major units of currency_code). Drives report tuition when set.
+    tuition_paid: int | None = Field(
+        default=None,
+        description="User-reported total tuition/fees paid or projected (major units). Canonical when present.",
+    )
+    tuition_is_total: bool = Field(
+        default=True,
+        description="If False, tuition_paid is treated as annual — multiplied to approximate total.",
+    )
     source: str = "manual"
 
 
@@ -66,6 +75,8 @@ class ResearchData(BaseModel):
     salary_range_low: int | None = None
     salary_range_high: int | None = None
     estimated_tuition: int | None = None
+    # When user supplied tuition_paid, this holds the web/LLM estimate for comparison (optional).
+    tuition_web_estimate: int | None = None
     tuition_if_invested: int | None = None
     tuition_opportunity_gap: int | None = None
     degree_roi_rank: str | None = None

@@ -34,6 +34,12 @@ export type ResearchDegreeProfileParams = {
   /** ISO 4217: GBP, USD, EUR — agent sets from user (e.g. £60k in London → GBP) */
   currency_code?: string;
   currencyCode?: string;
+  /** Total degree tuition/fees the user says they paid or will pay (major units of currency_code). Canonical for the report when set. */
+  tuition_paid?: number | null;
+  tuitionPaid?: number | null;
+  /** If false, tuition_paid is annual — backend approximates total (3yr UK-ish, 4yr otherwise). Default true. */
+  tuition_is_total?: boolean;
+  tuitionIsTotal?: boolean;
   source?: string;
 };
 
@@ -61,6 +67,8 @@ export const VOICE_AGENT_TOOLS_SPEC_MARKDOWN = `
   - \`years_experience\` (integer, optional) — alias \`yearsExperience\`
   - \`country_or_region\` (string, optional) — where they work/live (e.g. UK, Germany); alias \`countryOrRegion\`
   - \`currency_code\` (string, optional) — ISO 4217: **GBP**, **USD**, **EUR**, etc. Must match how they stated salary/tuition (e.g. £60k → GBP); alias \`currencyCode\`
+  - \`tuition_paid\` (integer, optional) — total tuition they paid or are paying for the degree (major units); alias \`tuitionPaid\`. Strongly preferred for a concrete tuition line on the card; web search still runs for salaries and context.
+  - \`tuition_is_total\` (boolean, optional, default true) — if false, \`tuition_paid\` is **annual** and the backend scales to an approximate total; alias \`tuitionIsTotal\`
   - \`source\` (string, optional; default voice)
 - **Returns:** JSON with grades, \`honest_take\`, \`safeguard_tips\` (ordered top moves for post-roast survival segment), salary/tuition/AI risk fields, etc.
 - **After tools:** When research_degree returns success (\`research_complete\` true), Phase 3 roast immediately — do not ask the user to confirm research. Phase 4: explain each safeguard tip as a move (what to do + brief why for this user); close with “if you only do one thing…”. Then \`save_roast_quote\` (roast one-liner only) and follow-ups. On failure, apologize and retry or clarify.

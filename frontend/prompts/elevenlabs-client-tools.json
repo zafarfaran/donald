@@ -154,6 +154,28 @@
         "required": false
       },
       {
+        "id": "tuition_paid",
+        "type": "string",
+        "value_type": "llm_prompt",
+        "description": "Total tuition/fees they paid or are paying for the degree (whole number in major units of currency_code). Ask directly if missing. If they only give annual fees, put that number here and set tuition_is_total to false. Empty string if they refuse — backend will still search.",
+        "dynamic_variable": "",
+        "constant_value": "",
+        "enum": null,
+        "is_system_provided": false,
+        "required": false
+      },
+      {
+        "id": "tuition_is_total",
+        "type": "string",
+        "value_type": "llm_prompt",
+        "description": "true if tuition_paid is total degree cost; false if it is annual/per-year fees (UK/US scaling is applied server-side). Default true.",
+        "dynamic_variable": "",
+        "constant_value": "",
+        "enum": null,
+        "is_system_provided": false,
+        "required": false
+      },
+      {
         "id": "source",
         "type": "string",
         "value_type": "llm_prompt",

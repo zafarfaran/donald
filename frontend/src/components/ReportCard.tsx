@@ -34,6 +34,7 @@ interface ReportCardData {
     currency_code?: string | null;
     avg_salary_for_degree: number | null;
     estimated_tuition: number | null;
+    tuition_web_estimate?: number | null;
     tuition_if_invested: number | null;
     tuition_opportunity_gap?: number | null;
     degree_roi_rank: string | null;
@@ -116,6 +117,14 @@ export default function ReportCard({ data }: { data: ReportCardData }) {
 
   const stats = [
     { label: "Tuition Paid", val: fmtMoney(data.research.estimated_tuition, cc) },
+    ...(data.research.tuition_web_estimate != null && data.research.tuition_web_estimate > 0
+      ? [
+          {
+            label: "Web tuition estimate",
+            val: fmtMoney(data.research.tuition_web_estimate, cc),
+          },
+        ]
+      : []),
     { label: "Degree Avg Salary", val: fmtMoney(data.research.avg_salary_for_degree, cc) },
     { label: "If You\u2019d Invested", val: fmtMoney(data.research.tuition_if_invested, cc), red: true },
     { label: "Job Market", val: data.research.job_market_trend ? data.research.job_market_trend.charAt(0).toUpperCase() + data.research.job_market_trend.slice(1) : "\u2014" },

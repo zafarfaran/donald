@@ -17,6 +17,7 @@ const KEY_LABELS: Record<string, string> = {
   avg_salary_for_role: "Typical salary (your role)",
   median_salary_for_role: "Median salary (your role)",
   estimated_tuition: "Estimated tuition",
+  tuition_web_estimate: "Published / web tuition estimate (if user gave their own)",
   tuition_if_invested: "If that tuition was invested instead",
   ai_replacement_risk_0_100: "Automation / AI risk",
   near_term_ai_risk_0_100: "Near-term AI (0–2y)",
@@ -59,6 +60,7 @@ function formatKeyValue(key: string, v: unknown, currencyCode: string): string {
     key === "avg_salary_for_role" ||
     key === "median_salary_for_role" ||
     key === "estimated_tuition" ||
+    key === "tuition_web_estimate" ||
     key === "tuition_if_invested"
   ) {
     return formatMoney(v, currencyCode);

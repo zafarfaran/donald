@@ -21,7 +21,7 @@ from backend.middleware.security import (
 )
 from backend.session_store import SessionStore
 from backend.telemetry import init_telemetry
-from backend.routers import scrape, session, research, report_card, webhooks, convai
+from backend.routers import scrape, session, research, report_card, webhooks, convai, public_metrics
 
 configure_logging()
 init_telemetry()
@@ -83,6 +83,7 @@ app.include_router(research.router)
 app.include_router(report_card.router)
 app.include_router(webhooks.router)
 app.include_router(convai.router)
+app.include_router(public_metrics.router)
 
 if not (os.getenv("OTEL_SDK_DISABLED") or "").strip().lower() in ("1", "true", "yes") and (
     os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or ""

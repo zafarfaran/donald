@@ -4,7 +4,7 @@ Use **Client** execution. Do **not** add `session_id` here (the Donald web app i
 
 Ready-made JSON (dashboard-style `parameters` array): `elevenlabs-client-tools.json` — includes `research_degree` and `save_roast_quote`.
 
-If your builder only offers **string** per row, use **string** for everything; the app coerces numeric strings for `graduation_year`, `salary`, and `years_experience`. If you have **number** / **integer**, use that for those three.
+If your builder only offers **string** per row, use **string** for everything; the app coerces numeric strings for `graduation_year`, `salary`, `years_experience`, and `tuition_paid`. If you have **number** / **integer**, use that for those fields.
 
 ---
 
@@ -96,6 +96,42 @@ Add **one row per identifier** below (all top-level on the tool). The browser bu
 | Data type | string *(or number)* |
 | Required | No |
 | Description | Total years in this role or field they mentioned. Integer. If not stated, leave empty or omit. |
+
+### `country_or_region`
+
+| Field | Value |
+|-------|--------|
+| Identifier | `country_or_region` |
+| Data type | string |
+| Required | No |
+| Description | Where they live or work (e.g. UK, Texas). Drives local salary/tuition search. |
+
+### `currency_code`
+
+| Field | Value |
+|-------|--------|
+| Identifier | `currency_code` |
+| Data type | string |
+| Required | No |
+| Description | ISO 4217: **GBP**, **USD**, **EUR**, etc. Must match how they stated money (£ → GBP). |
+
+### `tuition_paid`
+
+| Field | Value |
+|-------|--------|
+| Identifier | `tuition_paid` |
+| Data type | string *(or number)* |
+| Required | No |
+| Description | Total tuition/fees they paid or are paying for the degree (whole number in **major units** of `currency_code`). If they only know annual fees, put that number and set `tuition_is_total` to false. |
+
+### `tuition_is_total`
+
+| Field | Value |
+|-------|--------|
+| Identifier | `tuition_is_total` |
+| Data type | string *(or boolean if supported)* |
+| Required | No |
+| Description | `true` if `tuition_paid` is full degree cost; `false` if annual/per-year (server scales to approximate total). Default true. |
 
 ### `source`
 

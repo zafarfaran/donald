@@ -58,6 +58,8 @@ async def do_research(req: ResearchRequest, request: Request):
         salary=p.salary,
         country_or_region=p.country_or_region,
         currency_code=p.currency_code,
+        tuition_paid=p.tuition_paid,
+        tuition_is_total=p.tuition_is_total,
     )
     research = apply_cooked_components(research)
     await store.update_research(req.session_id, research)

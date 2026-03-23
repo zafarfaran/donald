@@ -8,6 +8,7 @@ Research pipeline (Claude-first):
 from __future__ import annotations
 
 import os
+import re
 import asyncio
 from datetime import datetime
 
@@ -180,6 +181,7 @@ def _methodology_note(
     sp500_used_fallback: bool,
     equity_benchmark: str = "S&P 500",
     student_illustrative_horizon: bool = False,
+    used_user_reported_tuition: bool = False,
 ) -> str:
     parts: list[str] = []
     if used_firecrawl:
@@ -188,6 +190,11 @@ def _methodology_note(
         parts.append("Web search was off — figures are thin.")
     if used_llm:
         parts.append("AI condensed the snippets into this card.")
+    if used_user_reported_tuition:
+        parts.append(
+            "Tuition on the card uses the amount the user reported (annual fees were scaled to a total when needed). "
+            "Published fees from search may differ."
+        )
     if sp500_used_fallback:
         parts.append(
             f"{equity_benchmark}-style growth uses a long-run average when snippets had no clear rate."
@@ -362,6 +369,22 @@ def resolve_research_query_plan(
     return queries, norm_currency, loc, equity_bench
 
 
+def _effective_user_tuition_total(
+    tuition_paid: int | None,
+    tuition_is_total: bool,
+    country_or_region: str,
+) -> int | None:
+    """Convert user-stated tuition to an approximate total degree cost (major units)."""
+    if tuition_paid is None or tuition_paid <= 0:
+        return None
+    if tuition_is_total:
+        return tuition_paid
+    region = (country_or_region or "").strip().lower()
+    ukish = bool(re.search(r"\b(uk|u\.k\.|united kingdom|england|scotland|wales|northern ireland|britain)\b", region))
+    years = 3 if ukish else 4
+    return tuition_paid * years
+
+
 def _sp500_model(
     tuition: int | None,
     sp500_pct: float | None,
@@ -390,8 +413,12 @@ def _build_from_llm(
     student_mode: bool,
     search_queries: list[str],
     search_hit_counts: list[int],
+    user_tuition_total: int | None = None,
 ) -> ResearchData:
-    tuition = llm.estimated_tuition
+    web_tuition = llm.estimated_tuition
+    used_user_reported = bool(user_tuition_total and user_tuition_total > 0)
+    tuition_web_estimate: int | None = web_tuition if used_user_reported else None
+    tuition = user_tuition_total if used_user_reported else web_tuition
     sp500_used_fallback = bool(tuition and tuition > 0 and llm.sp500_annual_return_pct is None)
     sp500_invested, sp500_total, sp500_annual = _sp500_model(
         tuition, llm.sp500_annual_return_pct, index_anchor_year, compound_years
@@ -417,6 +444,7 @@ def _build_from_llm(
         salary_range_low=llm.salary_range_low,
         salary_range_high=llm.salary_range_high,
         estimated_tuition=tuition,
+        tuition_web_estimate=tuition_web_estimate,
         tuition_if_invested=tuition_if_invested,
         tuition_opportunity_gap=opp_gap,
         degree_roi_rank=llm.degree_roi_rank,
@@ -434,6 +462,7 @@ def _build_from_llm(
             sp500_used_fallback=sp500_used_fallback,
             equity_benchmark=equity_benchmark,
             student_illustrative_horizon=student_mode,
+            used_user_reported_tuition=used_user_reported,
         ),
         sp500_annual_return_pct=sp500_annual,
         sp500_total_return_pct=sp500_total,
@@ -466,6 +495,7 @@ async def _try_agentic(
     currency_code: str,
     money_locale_key: str,
     equity_benchmark: str,
+    user_tuition_total: int | None = None,
 ) -> AgenticResult | None:
     sem = asyncio.Semaphore(_firecrawl_max_concurrent())
     search_fn = lambda q: _bounded_search(sem, fc, q)  # noqa: E731
@@ -482,6 +512,7 @@ async def _try_agentic(
             currency_code=currency_code,
             money_locale=money_locale_key,
             equity_benchmark=equity_benchmark,
+            user_tuition_total=user_tuition_total,
         )
     except Exception:
         logger.exception("Agentic research failed")
@@ -497,6 +528,8 @@ async def run_research(
     salary: int | None = None,
     country_or_region: str = "",
     currency_code: str = "USD",
+    tuition_paid: int | None = None,
+    tuition_is_total: bool = True,
 ) -> ResearchData:
     try:
         from opentelemetry import trace
@@ -516,6 +549,8 @@ async def run_research(
             salary,
             country_or_region,
             currency_code,
+            tuition_paid,
+            tuition_is_total,
         )
 
 
@@ -528,9 +563,14 @@ async def _run_research_impl(
     salary: int | None,
     country_or_region: str,
     currency_code: str,
+    tuition_paid: int | None = None,
+    tuition_is_total: bool = True,
 ) -> ResearchData:
     current_year = datetime.now().year
     fc = _get_firecrawl()
+    user_tuition_total = _effective_user_tuition_total(
+        tuition_paid, tuition_is_total, country_or_region
+    )
     queries, norm_currency, loc, equity_bench = resolve_research_query_plan(
         degree,
         university,
@@ -558,6 +598,7 @@ async def _run_research_impl(
         currency_code=norm_currency,
         money_locale_key=loc,
         equity_benchmark=equity_bench,
+        user_tuition_total=user_tuition_total,
     )
     if agentic is not None:
         logger.info(
@@ -579,6 +620,7 @@ async def _run_research_impl(
             student_mode=years_since_grad is None,
             search_queries=agentic.queries_used,
             search_hit_counts=agentic.hit_counts,
+            user_tuition_total=user_tuition_total,
         )
 
     # Fallback path: parallel search + one-shot Claude extraction (still no heuristics)
@@ -610,6 +652,7 @@ async def _run_research_impl(
         currency_code=norm_currency,
         money_locale=loc,
         equity_benchmark=equity_bench,
+        user_tuition_total=user_tuition_total,
     )
     if llm is None:
         raise RuntimeError("Claude analysis failed. Research requires Anthropic and Firecrawl.")
@@ -627,6 +670,7 @@ async def _run_research_impl(
         student_mode=years_since_grad is None,
         search_queries=queries,
         search_hit_counts=hit_counts,
+        user_tuition_total=user_tuition_total,
     )
 
 

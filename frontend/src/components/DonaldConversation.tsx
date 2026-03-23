@@ -163,6 +163,8 @@ function normalizeVoiceProfilePayload(parameters: unknown): Record<string, unkno
     sessionId: "session_id",
     countryOrRegion: "country_or_region",
     currencyCode: "currency_code",
+    tuitionPaid: "tuition_paid",
+    tuitionIsTotal: "tuition_is_total",
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(o)) {
@@ -171,9 +173,34 @@ function normalizeVoiceProfilePayload(parameters: unknown): Record<string, unkno
     out[nk] = v;
   }
   const digits = (x: unknown) => (typeof x === "string" && /^\d+$/.test(x) ? parseInt(x, 10) : x);
+  const parseMoneyish = (x: unknown): number | null => {
+    if (x === null || x === undefined || x === "") return null;
+    if (typeof x === "number" && Number.isFinite(x)) return Math.round(x);
+    if (typeof x === "string") {
+      const t = x.replace(/[,£$€\s]/g, "").trim();
+      if (!t) return null;
+      const n = parseInt(t, 10);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
   if ("graduation_year" in out) out.graduation_year = digits(out.graduation_year);
   if ("salary" in out) out.salary = digits(out.salary);
   if ("years_experience" in out) out.years_experience = digits(out.years_experience);
+  if ("tuition_paid" in out) {
+    const v = parseMoneyish(out.tuition_paid);
+    if (v !== null && v > 0) out.tuition_paid = v;
+    else delete out.tuition_paid;
+  }
+  if ("tuition_is_total" in out) {
+    const v = out.tuition_is_total;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      out.tuition_is_total = !(s === "false" || s === "0" || s === "no" || s === "annual");
+    } else {
+      out.tuition_is_total = Boolean(v);
+    }
+  }
   if ("currency_code" in out && typeof out.currency_code === "string") {
     const u = out.currency_code.trim().toUpperCase();
     out.currency_code = u || "USD";
