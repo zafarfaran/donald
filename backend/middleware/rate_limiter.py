@@ -14,6 +14,8 @@ from backend.redis_client import get_async_redis
 
 GLOBAL_LIMIT = int((os.getenv("RATE_LIMIT_GLOBAL_PER_MIN") or "100").strip())
 GLOBAL_WINDOW = 60
+WEBHOOK_DEFAULT_LIMIT = int((os.getenv("RATE_LIMIT_WEBHOOK_PER_MIN") or "20").strip())
+WEBHOOK_RESEARCH_LIMIT = int((os.getenv("RATE_LIMIT_WEBHOOK_RESEARCH_PER_MIN") or "6").strip())
 
 
 def _client_ip(request: Request) -> str:
@@ -30,8 +32,10 @@ def _endpoint_limit(method: str, path: str) -> tuple[int, int] | None:
         return 10, 60
     if method == "POST" and path == "/api/research":
         return 5, 60
+    if method == "POST" and path == "/api/webhooks/research_degree":
+        return WEBHOOK_RESEARCH_LIMIT, 60
     if method == "POST" and path.startswith("/api/webhooks/"):
-        return 30, 60
+        return WEBHOOK_DEFAULT_LIMIT, 60
     if method == "GET" and path == "/api/convai/conversation-token":
         return 5, 60
     return None

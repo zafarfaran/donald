@@ -74,6 +74,7 @@ Per [@elevenlabs/react](https://www.npmjs.com/package/@elevenlabs/react):
 
 - **Public agent** (no client auth): set `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` and keep `NEXT_PUBLIC_ELEVENLABS_USE_TOKEN=false`. The SDK connects with `agentId` only.
 - **Private / auth-required agent**: set `ELEVENLABS_API_KEY` in **`backend/.env`** (never in the frontend), set `NEXT_PUBLIC_ELEVENLABS_USE_TOKEN=true`, and restart both servers. The UI calls `GET /api/convai/conversation-token?agent_id=...` on your API; the API mints a short-lived WebRTC token from ElevenLabs.
+- **Token minting restriction (recommended):** set `ELEVENLABS_ALLOWED_AGENT_IDS` (comma-separated) or `ELEVENLABS_AGENT_ID` (single id). If set, the backend returns `403` for any other `agent_id`.
 
 Optional: if you test a **draft branch**, set `NEXT_PUBLIC_ELEVENLABS_BRANCH_ID` to the `branchId` from the ElevenLabs URL and the same query is forwarded when minting the token.
 
