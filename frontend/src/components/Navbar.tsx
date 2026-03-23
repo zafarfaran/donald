@@ -17,7 +17,7 @@ export default function Navbar() {
           <span className="font-display text-lg text-[var(--fg)]">Donald</span>
         </a>
         <a
-          href="#talk-donald"
+          href="/roast"
           className="px-5 py-2 text-sm font-semibold bg-[var(--gold)] text-black rounded-full
                      hover:bg-[var(--gold-dim)] transition-all glow-gold hover:scale-105 active:scale-95"
         >

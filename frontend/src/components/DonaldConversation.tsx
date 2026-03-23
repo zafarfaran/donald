@@ -136,6 +136,16 @@ function trimText(v: unknown, max = 360): string | undefined {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
+function sanitizeNarrativePercentages(v: string): string {
+  return v
+    // 57%
+    .replace(/\b\d{1,3}\s*%/g, "high")
+    // 57 / 100
+    .replace(/\b\d{1,3}\s*\/\s*100\b/g, "high")
+    // percentage words
+    .replace(/\b\d{1,3}\s*percent\b/gi, "high");
+}
+
 /**
  * ElevenLabs tool responses travel over the realtime channel. Keep this payload compact to
  * avoid oversized messages that can destabilize long voice sessions.
@@ -212,6 +222,7 @@ function compactResearchToolResult(raw: string): string {
     ? o.safeguard_tips
         .map((x) => trimText(x, 280))
         .filter((x): x is string => Boolean(x))
+        .map((x) => sanitizeNarrativePercentages(x))
         .slice(0, 6)
     : [];
   if (tips.length > 0) out.safeguard_tips = tips;
@@ -250,10 +261,16 @@ function compactResearchToolResult(raw: string): string {
     : [];
   if (searchHitCounts.length > 0) out.search_hit_counts = searchHitCounts;
 
-  const aiRiskReasoning = trimText(o.ai_risk_reasoning, 900);
+  const aiRiskReasoningRaw = trimText(o.ai_risk_reasoning, 900);
+  const aiRiskReasoning = aiRiskReasoningRaw
+    ? sanitizeNarrativePercentages(aiRiskReasoningRaw)
+    : undefined;
   if (aiRiskReasoning) out.ai_risk_reasoning = aiRiskReasoning;
 
-  const honestTake = trimText(o.honest_take, 700);
+  const honestTakeRaw = trimText(o.honest_take, 700);
+  const honestTake = honestTakeRaw
+    ? sanitizeNarrativePercentages(honestTakeRaw)
+    : undefined;
   if (honestTake) out.honest_take = honestTake;
 
   const methodologyNote = trimText(o.methodology_note, 280);

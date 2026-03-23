@@ -66,6 +66,15 @@ def compute_grade(
 
     grade_score = min(max(survival, 0), 100)
 
+    # Product rule: high-risk outcomes should always surface as the harshest label.
+    # "Pack it up buddy" in the UI maps to grade "F".
+    ai_now = ai
+    ai_near = research.near_term_ai_risk_0_100 or 0
+    cooked = research.overall_cooked_0_100 or 0
+    if max(ai_now, ai_near, cooked) > 80:
+        grade_score = min(grade_score, 34)
+        return ("F", grade_score)
+
     if grade_score >= 80:
         grade = "A"
     elif grade_score >= 65:
