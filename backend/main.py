@@ -51,23 +51,28 @@ _cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
-_fe = (os.getenv("FRONTEND_URL") or "").strip()
-if _fe:
-    _cors_origins.append(_fe)
+for _part in (os.getenv("FRONTEND_URL") or "").split(","):
+    _o = _part.strip().rstrip("/")
+    if _o:
+        _cors_origins.append(_o)
 
-# First added = outermost (runs first on incoming request)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_origin_regex = (os.getenv("CORS_ORIGIN_REGEX") or "").strip() or None
+
+# Starlette: last registered middleware runs FIRST. CORS must be outermost so OPTIONS
+# preflights get headers before rate limiting / activity tracking touch the request.
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(MaxBodySizeMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(ActivityTrackerMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 store = SessionStore()
 app.state.store = store
