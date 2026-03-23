@@ -27,6 +27,18 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _rate_limit_exempt(method: str, path: str) -> bool:
+    """
+    Public read-only endpoints that should not consume the global per-IP budget.
+    Homepage stats (and health) must stay available even when other API routes are hot.
+    """
+    if method == "GET" and path == "/api/public-metrics":
+        return True
+    if method == "GET" and path in ("/health", "/ready"):
+        return True
+    return False
+
+
 def _endpoint_limit(method: str, path: str) -> tuple[int, int] | None:
     if method == "POST" and path == "/api/session":
         return 10, 60
@@ -59,6 +71,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         method = request.method
+        if _rate_limit_exempt(method, path):
+            return await call_next(request)
+
         ip = _client_ip(request)
         r = await get_async_redis()
 
