@@ -129,6 +129,126 @@ function asObject(v: unknown): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 
+function trimText(v: unknown, max = 360): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  if (!s) return undefined;
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/**
+ * ElevenLabs tool responses travel over the realtime channel. Keep this payload compact to
+ * avoid oversized messages that can destabilize long voice sessions.
+ */
+function compactResearchToolResult(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  const o = asObject(parsed);
+  const out: Record<string, unknown> = {};
+
+  const pass = [
+    "research_complete",
+    "grade",
+    "grade_score",
+    "currency_code",
+    "avg_salary_for_degree",
+    "avg_salary_for_role",
+    "median_salary_for_role",
+    "salary_range_low",
+    "salary_range_high",
+    "estimated_tuition",
+    "tuition_web_estimate",
+    "tuition_if_invested",
+    "tuition_opportunity_gap",
+    "sp500_annual_return_pct",
+    "sp500_total_return_pct",
+    "years_since_graduation",
+    "degree_roi_rank",
+    "job_market_trend",
+    "unemployment_rate_pct",
+    "job_openings_estimate",
+    "lifetime_earnings_estimate",
+    "degree_premium_over_hs",
+    "ai_replacement_risk_0_100",
+    "near_term_ai_risk_0_100",
+    "career_market_stress_0_100",
+    "financial_roi_stress_0_100",
+    "overall_cooked_0_100",
+  ] as const;
+  for (const k of pass) {
+    if (k in o) out[k] = o[k];
+  }
+
+  const reportNumbers = asObject(o.report_numbers);
+  if (Object.keys(reportNumbers).length > 0) {
+    out.report_numbers = reportNumbers;
+  }
+
+  const tips = Array.isArray(o.safeguard_tips)
+    ? o.safeguard_tips
+        .map((x) => trimText(x, 280))
+        .filter((x): x is string => Boolean(x))
+        .slice(0, 6)
+    : [];
+  if (tips.length > 0) out.safeguard_tips = tips;
+
+  const sources = Array.isArray(o.sources)
+    ? o.sources
+        .map((s) => {
+          const row = asObject(s);
+          const title = trimText(row.title, 160);
+          const url = trimText(row.url, 220);
+          const topic = trimText(row.topic, 200);
+          return { title, url, topic };
+        })
+        .slice(0, 8)
+    : [];
+  if (sources.length > 0) out.sources = sources;
+
+  const namedSources = Array.isArray(o.named_sources)
+    ? o.named_sources
+        .map((x) => trimText(x, 80))
+        .filter((x): x is string => Boolean(x))
+        .slice(0, 10)
+    : [];
+  if (namedSources.length > 0) out.named_sources = namedSources;
+
+  const searchQueries = Array.isArray(o.search_queries)
+    ? o.search_queries
+        .map((x) => trimText(x, 120))
+        .filter((x): x is string => Boolean(x))
+        .slice(0, 10)
+    : [];
+  if (searchQueries.length > 0) out.search_queries = searchQueries;
+
+  const searchHitCounts = Array.isArray(o.search_hit_counts)
+    ? o.search_hit_counts.slice(0, 10)
+    : [];
+  if (searchHitCounts.length > 0) out.search_hit_counts = searchHitCounts;
+
+  const aiRiskReasoning = trimText(o.ai_risk_reasoning, 900);
+  if (aiRiskReasoning) out.ai_risk_reasoning = aiRiskReasoning;
+
+  const honestTake = trimText(o.honest_take, 700);
+  if (honestTake) out.honest_take = honestTake;
+
+  const methodologyNote = trimText(o.methodology_note, 280);
+  if (methodologyNote) out.methodology_note = methodologyNote;
+
+  const agentNote = trimText(o.agent_note, 1200);
+  if (agentNote) out.agent_note = agentNote;
+
+  try {
+    return JSON.stringify(out);
+  } catch {
+    return raw;
+  }
+}
+
 /**
  * Normalize inline profile for `research_degree` (not stored on session).
  * Accepts: JSON string, `{ profile }`, `{ profiles: [ {...} ] }`, top-level array `[ {...} ]`, camelCase.
@@ -272,11 +392,12 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
               : "Pulling public salary, tuition, and job-market info. Usually under a minute — stay on this tab.",
         });
         try {
-          const out = await postWebhook(
+          const rawOut = await postWebhook(
             "/api/webhooks/research_degree",
             { session_id: sid, profile },
             { timeoutMs: RESEARCH_WEBHOOK_TIMEOUT_MS }
           );
+          const out = compactResearchToolResult(rawOut);
           voiceDevLog("client_tool", "research_degree return", {
             returnPreview: typeof out === "string" ? voiceDevJson(out, 12000) : out,
           });

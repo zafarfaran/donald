@@ -70,6 +70,48 @@ const MOCK_REPORT_CARD = {
   roast_quote: "",
 };
 
+const MOCK_REVIEWS: PublicReview[] = [
+  {
+    review_id: "demo-review-1",
+    session_id: "demo-1",
+    quote: "$180k degree, AI writes better essays. The numbers broke me.",
+    reviewer_name: "Sarah M.",
+    degree: "English Lit",
+    university: "NYU",
+    grade: "D",
+    grade_score: 35,
+    overall_cooked_0_100: 74,
+    ai_replacement_risk_0_100: 72,
+    created_at: new Date().toISOString(),
+  },
+  {
+    review_id: "demo-review-2",
+    session_id: "demo-2",
+    quote: "67% automation risk + 90s of salary truth. Unwell.",
+    reviewer_name: "Marcus T.",
+    degree: "Comms",
+    university: "USC",
+    grade: "F",
+    grade_score: 22,
+    overall_cooked_0_100: 82,
+    ai_replacement_risk_0_100: 67,
+    created_at: new Date().toISOString(),
+  },
+  {
+    review_id: "demo-review-3",
+    session_id: "demo-3",
+    quote: "CS degree, low replace risk. I'll take it.",
+    reviewer_name: "Priya K.",
+    degree: "CS",
+    university: "Georgia Tech",
+    grade: "A",
+    grade_score: 90,
+    overall_cooked_0_100: 24,
+    ai_replacement_risk_0_100: 26,
+    created_at: new Date().toISOString(),
+  },
+];
+
 // ── API functions (with demo fallback) ──
 
 export async function createSession(profile: {
@@ -119,6 +161,76 @@ export async function getReportCard(sessionId: string) {
   if (!res.ok) return null;
   const data = await res.json();
   return data.report_card;
+}
+
+export type PublicReview = {
+  review_id: string;
+  session_id: string;
+  quote: string;
+  reviewer_name: string;
+  degree: string;
+  university: string;
+  grade: string;
+  grade_score: number;
+  overall_cooked_0_100?: number | null;
+  ai_replacement_risk_0_100?: number | null;
+  created_at: string;
+};
+
+export async function getPublicReviews(limit = 6): Promise<PublicReview[]> {
+  const safeLimit = Math.min(Math.max(limit, 1), 24);
+  if (DEMO_MODE) {
+    await new Promise((r) => setTimeout(r, 200));
+    return MOCK_REVIEWS.slice(0, safeLimit);
+  }
+  const res = await fetch(`${API_URL}/api/reviews?limit=${safeLimit}`, { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data.reviews) ? (data.reviews as PublicReview[]) : [];
+}
+
+export async function submitReview(input: {
+  sessionId: string;
+  quote: string;
+  reviewerName?: string;
+}): Promise<{ ok: boolean; review?: PublicReview; error?: string }> {
+  if (DEMO_MODE) {
+    await new Promise((r) => setTimeout(r, 350));
+    return {
+      ok: true,
+      review: {
+        review_id: `demo-review-${Date.now()}`,
+        session_id: input.sessionId,
+        quote: input.quote,
+        reviewer_name: input.reviewerName?.trim() || "You",
+        degree: MOCK_REPORT_CARD.profile.degree,
+        university: MOCK_REPORT_CARD.profile.university,
+        grade: MOCK_REPORT_CARD.grade,
+        grade_score: MOCK_REPORT_CARD.grade_score,
+        overall_cooked_0_100: MOCK_REPORT_CARD.research.overall_cooked_0_100,
+        ai_replacement_risk_0_100: MOCK_REPORT_CARD.research.ai_replacement_risk_0_100,
+        created_at: new Date().toISOString(),
+      },
+    };
+  }
+  try {
+    const res = await fetch(`${API_URL}/api/reviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: input.sessionId,
+        quote: input.quote,
+        reviewer_name: input.reviewerName?.trim() || undefined,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: (data.detail as string) || `HTTP ${res.status}` };
+    }
+    return { ok: true, review: data.review as PublicReview };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Network error" };
+  }
 }
 
 export type PublicMetrics = {

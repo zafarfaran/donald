@@ -15,6 +15,8 @@ export default function Footer() {
           {" & "}
           <a href="https://elevenlabs.io" target="_blank" rel="noopener noreferrer" className="text-[var(--fg)] hover:text-[var(--gold)] transition-colors">ElevenLabs</a>
           {" for "}<span className="text-[var(--fg)]">#ElevenHacks</span>
+          {" · built by "}
+          <a href="https://faranz.com" target="_blank" rel="noopener noreferrer" className="text-[var(--fg)] hover:text-[var(--gold)] transition-colors">Faran Z</a>
         </p>
         <p className="text-[var(--subtle)]/40 text-xs font-light">no degrees were harmed. feelings tho? absolutely.</p>
       </div>

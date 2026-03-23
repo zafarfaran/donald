@@ -138,6 +138,22 @@ class ReportCard(BaseModel):
     roast_quote: str = ""
 
 
+class PublicReview(BaseModel):
+    """User-submitted testimonial snapshot derived from a generated report card."""
+
+    review_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    quote: str
+    reviewer_name: str
+    degree: str
+    university: str
+    grade: str
+    grade_score: int
+    overall_cooked_0_100: int | None = None
+    ai_replacement_risk_0_100: int | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
 class Session(BaseModel):
     session_id: str
     profile: UserProfile

@@ -2,7 +2,14 @@ import uuid
 from datetime import datetime
 
 from backend.database import get_async_firestore
-from backend.models import Session, UserProfile, ResearchData, ReportCard, VoiceActivityItem
+from backend.models import (
+    Session,
+    UserProfile,
+    ResearchData,
+    ReportCard,
+    VoiceActivityItem,
+    PublicReview,
+)
 from backend.repositories.session_repo import AsyncSessionRepository
 from backend.services.public_metrics_service import apply_report_card_update_memory
 
@@ -15,6 +22,7 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._memory: dict[str, Session] = {}
+        self._reviews_memory: list[PublicReview] = []
         self._db = get_async_firestore()
         self._repo: AsyncSessionRepository | None = (
             AsyncSessionRepository(self._db) if self._db else None
@@ -104,3 +112,35 @@ class SessionStore:
         )
         if len(session.voice_activity) > 120:
             session.voice_activity[:] = session.voice_activity[-120:]
+
+    async def create_review(self, review: PublicReview) -> PublicReview:
+        if self._db:
+            await self._db.collection("reviews").document(review.review_id).set(
+                review.model_dump(mode="json")
+            )
+            return review
+        self._reviews_memory.append(review)
+        if len(self._reviews_memory) > 300:
+            self._reviews_memory[:] = self._reviews_memory[-300:]
+        return review
+
+    async def list_reviews(self, limit: int = 6) -> list[PublicReview]:
+        safe_limit = max(1, min(int(limit), 24))
+        if self._db:
+            from google.cloud import firestore
+
+            query = (
+                self._db.collection("reviews")
+                .order_by("created_at", direction=firestore.Query.DESCENDING)
+                .limit(safe_limit)
+            )
+            out: list[PublicReview] = []
+            async for doc in query.stream():
+                data = doc.to_dict() or {}
+                try:
+                    out.append(PublicReview.model_validate(data))
+                except Exception:
+                    continue
+            return out
+        ordered = sorted(self._reviews_memory, key=lambda r: r.created_at, reverse=True)
+        return ordered[:safe_limit]
