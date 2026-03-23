@@ -41,6 +41,23 @@ Set at least:
 - `NEXT_PUBLIC_FIREBASE_*` — from Firebase web app config
 - `NEXT_PUBLIC_ELEVENLABS_*` — agent id, token mode, etc.
 
+### Sentry (`@sentry/nextjs`)
+
+Runtime (Issues + tracing + replay):
+
+- `NEXT_PUBLIC_SENTRY_DSN` — browser DSN (public)
+- `SENTRY_DSN` — optional server/edge DSN; if unset, server falls back to `NEXT_PUBLIC_SENTRY_DSN`
+
+Build (source maps on `next build` — recommended for production):
+
+- `SENTRY_AUTH_TOKEN` — token with `project:releases` and `org:read` ([auth tokens](https://sentry.io/settings/auth-tokens/))
+- `SENTRY_ORG` — organization slug
+- `SENTRY_PROJECT` — project slug
+
+You can put build secrets in `.env.sentry-build-plugin` locally (gitignored) or only in Vercel **Environment Variables** for Production.
+
+Interactive setup (optional): `npx @sentry/wizard@latest -i nextjs`
+
 ## Deploy
 
 - **Preview (branch / PR):**

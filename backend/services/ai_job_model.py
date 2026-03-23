@@ -13,23 +13,23 @@ from backend.models import JobTaskExposure
 # Horizons treated as “near term” for a separate meter (0–2y vibe)
 _NEAR_TERM_HORIZONS = frozenset({"now", "1_2_years"})
 
-# Pessimistic lift for headline AI exposure: routine / junior / rules-heavy work should read harshly.
-# Maps each raw 0–100 score upward (strongest effect in the mid band), capped at 100.
-_HARSH_LIFT_RATIO = 0.18
-_HARSH_FLOOR_BUMP = 5
+# Light calibration: small upward nudge to account for the pace of AI tooling adoption.
+# Kept mild so that genuinely low-risk roles stay low and the score feels honest.
+_CALIBRATION_LIFT_RATIO = 0.06
+_CALIBRATION_FLOOR_BUMP = 2
 
 
 def harsh_calibrate_automation_0_100(raw: int) -> int:
     """
-    Pull automation exposure scores up — models real-world pessimism (tools ship fast,
-    employers automate junior layers first, rules-based workflows are easy targets).
+    Mild upward calibration — accounts for fast-moving tooling adoption without
+    inflating scores so much that every career looks doomed.
     """
     try:
         x = int(raw)
     except (TypeError, ValueError):
         x = 50
     x = max(0, min(100, x))
-    lifted = x + (100 - x) * _HARSH_LIFT_RATIO + _HARSH_FLOOR_BUMP
+    lifted = x + (100 - x) * _CALIBRATION_LIFT_RATIO + _CALIBRATION_FLOOR_BUMP
     return max(0, min(100, int(round(lifted))))
 
 
@@ -81,17 +81,18 @@ def compute_overall_cooked_from_components(
     financial_roi_stress_0_100: int,
 ) -> int:
     """
-    Composite cooked: 55% AI exposure + 25% career/market stress + 20% financial stress.
-    If AI risk > 70, overall cooked is at least that value.
+    Composite cooked: 45% AI exposure + 30% career/market stress + 25% financial stress.
+    Only pulls overall up to AI risk when AI risk is extreme (>85) and the other
+    signals also look bad — otherwise the blend speaks for itself.
     """
     raw = (
-        0.55 * ai_replacement_risk_0_100
-        + 0.25 * career_market_stress_0_100
-        + 0.20 * financial_roi_stress_0_100
+        0.45 * ai_replacement_risk_0_100
+        + 0.30 * career_market_stress_0_100
+        + 0.25 * financial_roi_stress_0_100
     )
     out = max(0, min(100, int(round(raw))))
-    if ai_replacement_risk_0_100 > 70:
-        out = max(out, ai_replacement_risk_0_100)
+    if ai_replacement_risk_0_100 > 85 and career_market_stress_0_100 > 50:
+        out = max(out, ai_replacement_risk_0_100 - 10)
     return out
 
 

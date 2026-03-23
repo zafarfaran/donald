@@ -26,6 +26,7 @@ export default function RoastPage() {
   const [step, setStep] = useState<"choose" | "webcall">("choose");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [startError, setStartError] = useState<string>("");
   const [liveActivity, setLiveActivity] = useState<VoiceActivityRow[]>([]);
   const [serverActivity, setServerActivity] = useState<VoiceActivityRow[]>([]);
   const [activityPoll, setActivityPoll] = useState<{ ok: boolean; error?: string; at: number }>({
@@ -85,15 +86,17 @@ export default function RoastPage() {
 
   const createAndStart = async () => {
     setLoading(true);
+    setStartError("");
     try {
       const session = await createVoiceSession();
       setSessionId(session.session_id);
-    } catch {
-      const session = await createVoiceSession();
-      setSessionId(session.session_id);
+      setStep("webcall");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not start voice call.";
+      setStartError(msg);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-    setStep("webcall");
   };
 
   return (
@@ -137,6 +140,11 @@ export default function RoastPage() {
                   </div>
                 </motion.button>
               </div>
+              {startError && (
+                <p className="text-red-300 text-xs mt-3 max-w-md mx-auto">
+                  {startError}
+                </p>
+              )}
 
               {/*
                 Phone-call UI intentionally disabled for faster production launch.

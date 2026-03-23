@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Request
@@ -18,6 +19,7 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 VOICE_RESEARCH_DEADLINE_SEC = float(os.getenv("VOICE_RESEARCH_DEADLINE_SEC", "270"))
+VOICE_SESSION_MAX_SECONDS = int((os.getenv("VOICE_SESSION_MAX_SECONDS") or "180").strip())
 
 
 def _profile_blurb(p: UserProfile) -> str:
@@ -42,6 +44,23 @@ def _voice_research_profile_errors(p: UserProfile) -> str | None:
 def _truncate(s: str, n: int = 220) -> str:
     s = (s or "").strip()
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _session_age_seconds(created_at: datetime) -> int:
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return int((datetime.now(timezone.utc) - created_at).total_seconds())
+
+
+def _voice_time_limit_payload() -> dict:
+    return {
+        "error": "Voice time limit reached for today (3 minutes max).",
+        "research_complete": False,
+        "agent_note": (
+            "Daily voice limit reached. Apologize in one sentence and ask the user to come back tomorrow."
+        ),
+        "come_back_tomorrow": True,
+    }
 
 
 def _voice_research_started_payload(p: UserProfile, queries: list[str]) -> dict:
@@ -203,6 +222,8 @@ async def webhook_get_profile(req: WebhookRequest, request: Request):
     session = await store.get(req.session_id)
     if not session:
         return {"error": "Session not found"}
+    if _session_age_seconds(session.created_at) > VOICE_SESSION_MAX_SECONDS:
+        return _voice_time_limit_payload()
     p = session.profile
     await store.append_voice_activity(
         req.session_id,
@@ -235,6 +256,11 @@ async def webhook_update_profile(req: UpdateUserProfileRequest, request: Request
     ensure_session_id(req.session_id)
     store = request.app.state.store
     patch = req.model_dump(exclude={"session_id"}, exclude_unset=True)
+    session = await store.get(req.session_id)
+    if not session:
+        return {"error": "Session not found", "ok": False}
+    if _session_age_seconds(session.created_at) > VOICE_SESSION_MAX_SECONDS:
+        return _voice_time_limit_payload()
     if not await store.patch_profile(req.session_id, patch):
         return {"error": "Session not found", "ok": False}
     session = await store.get(req.session_id)
@@ -276,6 +302,8 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
             "research_complete": False,
             "agent_note": "Research did not run — session missing. Ask the user to restart the call from the app.",
         }
+    if _session_age_seconds(session.created_at) > VOICE_SESSION_MAX_SECONDS:
+        return _voice_time_limit_payload()
 
     p = req.profile.to_user_profile()
     if err := _voice_research_profile_errors(p):
@@ -430,6 +458,11 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
 async def webhook_save_quote(req: SaveQuoteRequest, request: Request):
     ensure_session_id(req.session_id)
     store = request.app.state.store
+    session = await store.get(req.session_id)
+    if not session:
+        return {"saved": False, "error": "Session not found"}
+    if _session_age_seconds(session.created_at) > VOICE_SESSION_MAX_SECONDS:
+        return _voice_time_limit_payload()
     await store.update_roast_quote(req.session_id, req.quote)
     await store.append_voice_activity(
         req.session_id,

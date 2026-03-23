@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Sentry build plugin (source map upload token — never commit)
+.env.sentry-build-plugin
+
 # vercel
 .vercel
 

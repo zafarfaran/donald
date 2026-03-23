@@ -43,35 +43,38 @@ def compute_grade(
 ) -> tuple[str, int]:
     """
     Letter grade + 0–100 score.
-    Blends career/tuition signals with AI replacement risk (high risk drags grade down).
+    Career quality is the primary signal; AI risk is a meaningful drag but not
+    the whole story — a nurse or plumber with low AI risk shouldn't get punished
+    just because the system defaults to doom.
     """
     career = _career_quality_0_100(research, salary)
     ai = research.ai_replacement_risk_0_100
     if ai is None:
         ai = 50
 
-    # Survival score: career matters, but AI risk pulls you down meaningfully
-    survival = int(0.5 * career + 0.5 * (100 - ai))
+    # 60 % career fundamentals, 40 % AI-resilience
+    survival = int(0.60 * career + 0.40 * (100 - ai))
 
     if years_experience is not None and years_experience >= 10:
-        survival = min(100, survival + 4)
+        survival = min(100, survival + 5)
     elif years_experience is not None and years_experience <= 1:
         survival = max(0, survival - 3)
 
-    # Strict: high AI replacement risk caps how good the letter grade can look
-    if ai > 70:
-        cap = int(72 - (ai - 70) * 1.15)
-        cap = max(28, min(68, cap))
+    # High AI risk still caps upside, but less aggressively than before
+    if ai > 75:
+        cap = int(75 - (ai - 75) * 0.8)
+        cap = max(30, min(70, cap))
         survival = min(survival, cap)
 
     grade_score = min(max(survival, 0), 100)
 
-    # Product rule: high-risk outcomes should always surface as the harshest label.
-    # "Pack it up buddy" in the UI maps to grade "F".
+    # Only force an F when the picture is unambiguously dire: at least two of the
+    # three risk signals must be extreme, not just one outlier.
     ai_now = ai
     ai_near = research.near_term_ai_risk_0_100 or 0
     cooked = research.overall_cooked_0_100 or 0
-    if max(ai_now, ai_near, cooked) > 80:
+    extreme_count = sum(1 for v in (ai_now, ai_near, cooked) if v > 80)
+    if extreme_count >= 2:
         grade_score = min(grade_score, 34)
         return ("F", grade_score)
 

@@ -134,7 +134,15 @@ export async function createSession(profile: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(profile),
   });
-  return res.json();
+  const data = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok) {
+    const detail =
+      typeof data.detail === "string"
+        ? data.detail
+        : `Could not create session (HTTP ${res.status})`;
+    throw new Error(detail);
+  }
+  return data as { session_id: string };
 }
 
 /** Empty session for voice: profile is not accumulated server-side; agent passes inline \`profile\` to \`research_degree\`. */

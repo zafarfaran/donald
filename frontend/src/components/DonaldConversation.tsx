@@ -10,8 +10,10 @@ import {
   VOICE_RESEARCH_CLIENT_ERROR_TITLE,
   VOICE_RESEARCH_CLIENT_START_TITLE,
 } from "@/lib/voiceActivityResearch";
+import { isVoiceClientToolName } from "@/lib/voiceAgentTools";
 
 // ElevenLabs Client tool names + parameter list: `src/lib/voiceAgentTools.ts`
+// If tools never run: ElevenLabs agent must use **Client** tools, not Webhooks — see `prompts/ELEVENLABS_CLIENT_TOOLS_CHECKLIST.md`.
 
 interface Props {
   sessionId: string;
@@ -38,6 +40,12 @@ function toolLine(toolName: string) {
 function userFacingErrorMessage(message: string): string {
   const m = (message || "").trim();
   if (!m) return "Something went wrong. Please try again.";
+  if (/quota limit|exceeds your quota/i.test(m)) {
+    return "Voice credits are exhausted right now. Please try again later.";
+  }
+  if (/daily voice limit|come back tomorrow|3-minute daily limit|time limit reached/i.test(m)) {
+    return "You hit today’s voice limit. Come back tomorrow for another roast.";
+  }
   if (/missing\s+error_event|dynamic variables|agent config/i.test(m)) {
     return "Agent config mismatch. Refresh and retry. If it repeats, update the ElevenLabs agent variables.";
   }
@@ -600,10 +608,14 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
     },
     onAgentToolRequest: (p) => {
       voiceDevLog("sdk", "onAgentToolRequest (server/webhook tool path)", p);
+      const tn = p.tool_name || "";
+      const isOurs = isVoiceClientToolName(tn);
       emit({
         event: "agent_tool_request",
-        title: toolLine(p.tool_name),
-        detail: "One moment…",
+        title: toolLine(tn),
+        detail: isOurs
+          ? `ElevenLabs triggered “${tn}” on the server (${p.tool_type || "type ?"}). This app only runs that tool in the **browser** (Client tool). In ElevenLabs → Agent → Tools, set ${tn} to **Client** and import \`prompts/elevenlabs-client-tools.json\` — not a webhook.`
+          : "One moment…",
       });
     },
     onAgentToolResponse: (p) => {
@@ -622,10 +634,13 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
     },
     onUnhandledClientToolCall: (params) => {
       voiceDevLog("sdk", "onUnhandledClientToolCall", params);
+      const tn = params.tool_name || "";
       emit({
         event: "client_tool_unhandled",
-        title: "This action isn’t available here",
-        detail: "Donald tried something the app doesn’t support yet. You can keep talking or refresh and try again.",
+        title: "Tool name mismatch",
+        detail: tn
+          ? `The agent called “${tn}” but this page only handles: research_degree, save_roast_quote. Fix the tool name in ElevenLabs to match exactly (snake_case).`
+          : "Donald tried a client tool this build doesn’t handle. Check ElevenLabs tool names match research_degree and save_roast_quote.",
       });
     },
     onInterruption: VOICE_DEV_LOG

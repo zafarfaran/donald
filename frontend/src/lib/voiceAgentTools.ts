@@ -14,6 +14,14 @@ export const VOICE_AGENT_TOOL_NAMES = ["research_degree", "save_roast_quote"] as
 
 export type VoiceAgentToolName = (typeof VOICE_AGENT_TOOL_NAMES)[number];
 
+/** Tools the web app implements via `useConversation({ clientTools })`. */
+export const VOICE_CLIENT_TOOL_NAME_SET = new Set<string>(VOICE_AGENT_TOOL_NAMES);
+
+/** ElevenLabs `agent_tool_request` for these names usually means tools are Webhook/Server, not Client. */
+export function isVoiceClientToolName(name: string): boolean {
+  return VOICE_CLIENT_TOOL_NAME_SET.has(name);
+}
+
 /** Shape inside `research_degree` → POST body `profile` (snake_case or camelCase aliases). */
 export type ResearchDegreeProfileParams = {
   name?: string;
