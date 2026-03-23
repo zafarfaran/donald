@@ -129,12 +129,14 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
             "c_or_worse_count": 0,
             "regret_sum_0_5": 0.0,
             "degrees_cooked": 0,
+            "people_talked_to_donald": 0,
             "c_or_worse_pct": 0.0,
             "tuition_in_shambles_usd": 0,
             "regret_score_0_5": 0.0,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "display": {
                 "degrees_cooked": "0+",
+                "people_talked_to_donald": "0+",
                 "c_or_worse_pct": "0%",
                 "tuition_in_shambles": "$0",
                 "regret_score": "0.0/5",
@@ -144,7 +146,6 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
     c_or_worse = 0
     tuition_in_shambles = 0
     regret_samples: list[float] = []
-
     for card in cards:
         grade = (card.grade or "").strip().upper()
         if grade in {"C", "D", "F"}:
@@ -172,12 +173,14 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
         "c_or_worse_count": c_or_worse,
         "regret_sum_0_5": regret_sum,
         "degrees_cooked": total,
+        "people_talked_to_donald": total,
         "c_or_worse_pct": pct,
         "tuition_in_shambles_usd": tuition_in_shambles,
         "regret_score_0_5": regret,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "display": {
             "degrees_cooked": f"{total:,}+",
+            "people_talked_to_donald": f"{total:,}+",
             "c_or_worse_pct": f"{round(pct)}%",
             "tuition_in_shambles": _format_compact_usd(tuition_in_shambles),
             "regret_score": f"{regret:.1f}/5",
@@ -258,12 +261,14 @@ def _render_aggregate_snapshot(
         "c_or_worse_count": c_count,
         "regret_sum_0_5": round(regret_sum, 4),
         "degrees_cooked": total,
+        "people_talked_to_donald": total,
         "c_or_worse_pct": pct,
         "tuition_in_shambles_usd": tuition,
         "regret_score_0_5": regret,
         "updated_at": updated_at,
         "display": {
             "degrees_cooked": f"{total:,}+",
+            "people_talked_to_donald": f"{total:,}+",
             "c_or_worse_pct": f"{round(pct)}%",
             "tuition_in_shambles": _format_compact_usd(tuition),
             "regret_score": f"{regret:.1f}/5",
@@ -318,7 +323,6 @@ def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> 
 
     metrics_ref = db.collection(METRICS_COLLECTION).document(METRICS_DOC_ID)
     contrib_ref = db.collection(CONTRIB_COLLECTION).document(session_id)
-    new_contrib = _card_contribution(report_card)
     tx = db.transaction()
 
     @gcfirestore.transactional
@@ -327,6 +331,7 @@ def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> 
         contrib_snap = contrib_ref.get(transaction=transaction)
         metrics = metrics_snap.to_dict() or {}
         old = contrib_snap.to_dict() or {}
+        new_contrib = _card_contribution(report_card)
 
         base_total = int(metrics.get("total_cards") or metrics.get("degrees_cooked") or 0)
         base_c = int(metrics.get("c_or_worse_count") or 0)
@@ -348,7 +353,6 @@ def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> 
             regret_sum_0_5=base_regret_sum,
             regret_score_hint=metrics.get("regret_score_0_5"),
         )
-
         next_total = base_total + int(new_contrib["total_cards"]) - int(old.get("total_cards") or 0)
         next_c = base_c + int(new_contrib["c_or_worse_count"]) - int(old.get("c_or_worse_count") or 0)
         next_tuition = base_tuition + int(new_contrib["tuition_in_shambles_usd"]) - int(old.get("tuition_in_shambles_usd") or 0)

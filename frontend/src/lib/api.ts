@@ -235,12 +235,14 @@ export async function submitReview(input: {
 
 export type PublicMetrics = {
   degrees_cooked: number;
+  people_talked_to_donald: number;
   c_or_worse_pct: number;
   tuition_in_shambles_usd: number;
   regret_score_0_5: number;
   updated_at: string;
   display: {
     degrees_cooked: string;
+    people_talked_to_donald: string;
     c_or_worse_pct: string;
     tuition_in_shambles: string;
     regret_score: string;

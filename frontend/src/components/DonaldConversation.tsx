@@ -785,9 +785,14 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
           {phase === "connecting" ? "Connecting..." : "Talk to Donald"}
         </motion.button>
       ) : phase !== "done" ? (
-        <button onClick={end} className="px-5 py-2 bg-[var(--card)] border border-white/10 rounded-lg text-xs text-[var(--subtle)] hover:text-[var(--fg)] hover:border-white/20 transition-all">
-          End Conversation
-        </button>
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-[10px] text-[var(--subtle)]/80 text-center">
+            End the call when you are ready to open your report.
+          </p>
+          <button onClick={end} className="px-5 py-2 bg-[var(--card)] border border-white/10 rounded-lg text-xs text-[var(--subtle)] hover:text-[var(--fg)] hover:border-white/20 transition-all">
+            End Conversation
+          </button>
+        </div>
       ) : (
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-[var(--gold)] text-xs font-display italic">
           Redirecting to your vibe sheet...
