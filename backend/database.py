@@ -33,7 +33,10 @@ def _bootstrap_gcp_credentials() -> None:
     if not p.is_absolute():
         candidate = Path(__file__).resolve().parent / raw
         if candidate.is_file():
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(candidate)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(candidate.resolve())
+            return
+    # Filename set but missing (e.g. local path copied to Railway) — don't leave a bad path for google.auth.
+    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
 
 _bootstrap_gcp_credentials()

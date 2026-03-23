@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Before any backend import: middleware/session_store import database.py, which bootstraps GCP creds.
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +22,6 @@ from backend.middleware.security import (
 from backend.session_store import SessionStore
 from backend.telemetry import init_telemetry
 from backend.routers import scrape, session, research, report_card, webhooks, convai
-
-# Always load backend/.env regardless of shell cwd
-load_dotenv(Path(__file__).resolve().parent / ".env")
 
 configure_logging()
 init_telemetry()
