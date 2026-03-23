@@ -177,7 +177,7 @@ export type PublicReview = {
   created_at: string;
 };
 
-export async function getPublicReviews(limit = 6): Promise<PublicReview[]> {
+export async function getPublicReviews(limit = 20): Promise<PublicReview[]> {
   const safeLimit = Math.min(Math.max(limit, 1), 24);
   if (DEMO_MODE) {
     await new Promise((r) => setTimeout(r, 200));

@@ -46,7 +46,7 @@ async def submit_review(req: SubmitReviewRequest, request: Request):
 @router.get("/api/reviews")
 async def list_reviews(
     request: Request,
-    limit: int = Query(default=6, ge=1, le=24),
+    limit: int = Query(default=20, ge=1, le=24),
 ):
     store = request.app.state.store
     reviews = await store.list_reviews(limit=limit)

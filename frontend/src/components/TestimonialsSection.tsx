@@ -16,7 +16,7 @@ export default function TestimonialsSection() {
 
   useEffect(() => {
     let mounted = true;
-    getPublicReviews(6).then((rows) => {
+    getPublicReviews(20).then((rows) => {
       if (!mounted) return;
       if (rows.length > 0) {
         setTestimonials(rows);
