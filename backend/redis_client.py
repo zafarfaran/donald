@@ -10,12 +10,19 @@ if TYPE_CHECKING:
 
 
 def redis_url() -> str:
-    return (os.getenv("REDIS_URL") or "redis://localhost:6379/0").strip()
+    """Broker URL when Redis is enabled; must be non-empty in that case."""
+    u = (os.getenv("REDIS_URL") or "").strip()
+    return u or "redis://localhost:6379/0"
 
 
 def redis_enabled() -> bool:
-    """False when REDIS_DISABLED=1 (e.g. unit tests without Redis)."""
-    return (os.getenv("REDIS_DISABLED") or "").strip().lower() not in ("1", "true", "yes")
+    """Use Redis only when REDIS_URL is set and not explicitly disabled.
+
+    Without REDIS_URL (typical Railway API-only deploy), rate limiting falls back to in-memory.
+    """
+    if (os.getenv("REDIS_DISABLED") or "").strip().lower() in ("1", "true", "yes"):
+        return False
+    return bool((os.getenv("REDIS_URL") or "").strip())
 
 
 @lru_cache(maxsize=1)
