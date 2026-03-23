@@ -33,6 +33,8 @@ interface ReportCardData {
   research: {
     currency_code?: string | null;
     avg_salary_for_degree: number | null;
+    avg_salary_for_role?: number | null;
+    median_salary_for_role?: number | null;
     estimated_tuition: number | null;
     tuition_web_estimate?: number | null;
     tuition_if_invested: number | null;
@@ -126,6 +128,12 @@ export default function ReportCard({ data }: { data: ReportCardData }) {
         ]
       : []),
     { label: "Degree Avg Salary", val: fmtMoney(data.research.avg_salary_for_degree, cc) },
+    ...(data.research.avg_salary_for_role != null
+      ? [{ label: "Role Avg Salary", val: fmtMoney(data.research.avg_salary_for_role, cc) }]
+      : []),
+    ...(data.research.median_salary_for_role != null
+      ? [{ label: "Role Median Salary", val: fmtMoney(data.research.median_salary_for_role, cc) }]
+      : []),
     { label: "If You\u2019d Invested", val: fmtMoney(data.research.tuition_if_invested, cc), red: true },
     { label: "Job Market", val: data.research.job_market_trend ? data.research.job_market_trend.charAt(0).toUpperCase() + data.research.job_market_trend.slice(1) : "\u2014" },
   ];

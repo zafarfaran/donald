@@ -47,6 +47,80 @@ def _safe_int(v: Any) -> int | None:
     return n
 
 
+def _normalize_regret_sum_0_5(
+    *,
+    total_cards: int,
+    regret_sum_0_5: float,
+    regret_score_hint: Any = None,
+) -> float:
+    """
+    Normalize regret sum to a true 0..5-per-card scale.
+    Handles legacy snapshots where regret was accidentally stored as 0..100.
+    """
+    total = max(0, int(total_cards))
+    if total == 0:
+        return 0.0
+    try:
+        s = max(0.0, float(regret_sum_0_5))
+    except Exception:
+        s = 0.0
+
+    avg = s / total
+    # Legacy bug shape: average looked like 30.1/5 (actually 0..100 scale).
+    if avg > 5.0 and avg <= 100.0:
+        s = s / 20.0
+        avg = s / total
+
+    # Optional hint fallback from regret_score field.
+    if avg > 5.0 and regret_score_hint is not None:
+        try:
+            hint = float(regret_score_hint)
+            if 0.0 <= hint <= 5.0:
+                s = hint * total
+            elif 5.0 < hint <= 100.0:
+                s = (hint / 20.0) * total
+        except Exception:
+            pass
+
+    # Hard safety clamp.
+    return min(max(0.0, s), 5.0 * total)
+
+
+def _snapshot_to_canonical(snapshot: dict[str, Any]) -> dict[str, Any]:
+    total = int(snapshot.get("total_cards") or snapshot.get("degrees_cooked") or 0)
+    c_count = int(snapshot.get("c_or_worse_count") or 0)
+    if c_count == 0 and total > 0 and "c_or_worse_pct" in snapshot:
+        try:
+            c_count = int(round((float(snapshot.get("c_or_worse_pct") or 0.0) / 100.0) * total))
+        except Exception:
+            c_count = 0
+
+    tuition = int(snapshot.get("tuition_in_shambles_usd") or 0)
+    regret_sum = float(snapshot.get("regret_sum_0_5") or 0.0)
+    if regret_sum == 0.0 and total > 0 and "regret_score_0_5" in snapshot:
+        try:
+            regret_sum = float(snapshot.get("regret_score_0_5") or 0.0) * total
+        except Exception:
+            regret_sum = 0.0
+    regret_sum = _normalize_regret_sum_0_5(
+        total_cards=total,
+        regret_sum_0_5=regret_sum,
+        regret_score_hint=snapshot.get("regret_score_0_5"),
+    )
+
+    updated_at = snapshot.get("updated_at")
+    if not isinstance(updated_at, str) or not updated_at.strip():
+        updated_at = datetime.now(timezone.utc).isoformat()
+
+    return _render_aggregate_snapshot(
+        total_cards=max(0, total),
+        c_or_worse_count=max(0, c_count),
+        tuition_in_shambles_usd=max(0, tuition),
+        regret_sum_0_5=regret_sum,
+        updated_at=updated_at,
+    )
+
+
 def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
     total = len(cards)
     if total == 0:
@@ -171,7 +245,10 @@ def _render_aggregate_snapshot(
     total = max(0, int(total_cards))
     c_count = max(0, min(total, int(c_or_worse_count)))
     tuition = max(0, int(tuition_in_shambles_usd))
-    regret_sum = max(0.0, float(regret_sum_0_5))
+    regret_sum = _normalize_regret_sum_0_5(
+        total_cards=total,
+        regret_sum_0_5=regret_sum_0_5,
+    )
 
     pct = round((c_count / total) * 100, 1) if total else 0.0
     regret = round(regret_sum / total, 1) if total else 0.0
@@ -266,6 +343,11 @@ def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> 
                 base_regret_sum = float(metrics.get("regret_score_0_5") or 0.0) * base_total
             except Exception:
                 base_regret_sum = 0.0
+        base_regret_sum = _normalize_regret_sum_0_5(
+            total_cards=base_total,
+            regret_sum_0_5=base_regret_sum,
+            regret_score_hint=metrics.get("regret_score_0_5"),
+        )
 
         next_total = base_total + int(new_contrib["total_cards"]) - int(old.get("total_cards") or 0)
         next_c = base_c + int(new_contrib["c_or_worse_count"]) - int(old.get("c_or_worse_count") or 0)
@@ -361,11 +443,17 @@ async def recompute_public_metrics(store) -> dict[str, Any]:
 async def get_public_metrics(store) -> dict[str, Any]:
     if not getattr(store, "uses_firestore", False):
         mem_snap = getattr(store, "_metrics_snapshot", None)
-        if isinstance(mem_snap, dict) and "display" in mem_snap:
-            return mem_snap
+        if isinstance(mem_snap, dict):
+            canonical = _snapshot_to_canonical(mem_snap)
+            setattr(store, "_metrics_snapshot", canonical)
+            return canonical
     snap = await _read_metrics_snapshot()
-    if isinstance(snap, dict) and "display" in snap:
-        return snap
+    if isinstance(snap, dict):
+        canonical = _snapshot_to_canonical(snap)
+        # Self-heal legacy snapshots in Firestore when canonical values changed.
+        if canonical != snap:
+            await _write_metrics_snapshot(canonical)
+        return canonical
     return await recompute_public_metrics(store)
 
 

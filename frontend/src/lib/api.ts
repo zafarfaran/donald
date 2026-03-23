@@ -248,22 +248,6 @@ export type PublicMetrics = {
 };
 
 export async function getPublicMetrics(): Promise<PublicMetrics> {
-  if (DEMO_MODE) {
-    await new Promise((r) => setTimeout(r, 250));
-    return {
-      degrees_cooked: 12847,
-      c_or_worse_pct: 73,
-      tuition_in_shambles_usd: 2400000,
-      regret_score_0_5: 4.8,
-      updated_at: new Date().toISOString(),
-      display: {
-        degrees_cooked: "12,847+",
-        c_or_worse_pct: "73%",
-        tuition_in_shambles: "$2.4M",
-        regret_score: "4.8/5",
-      },
-    };
-  }
   const res = await fetch(`${API_URL}/api/public-metrics`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to fetch metrics (${res.status})`);

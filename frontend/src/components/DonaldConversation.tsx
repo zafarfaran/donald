@@ -150,42 +150,62 @@ function compactResearchToolResult(raw: string): string {
   const o = asObject(parsed);
   const out: Record<string, unknown> = {};
 
-  const pass = [
-    "research_complete",
-    "grade",
-    "grade_score",
-    "currency_code",
-    "avg_salary_for_degree",
-    "avg_salary_for_role",
-    "median_salary_for_role",
-    "salary_range_low",
-    "salary_range_high",
-    "estimated_tuition",
-    "tuition_web_estimate",
-    "tuition_if_invested",
-    "tuition_opportunity_gap",
-    "sp500_annual_return_pct",
-    "sp500_total_return_pct",
-    "years_since_graduation",
-    "degree_roi_rank",
-    "job_market_trend",
-    "unemployment_rate_pct",
-    "job_openings_estimate",
-    "lifetime_earnings_estimate",
-    "degree_premium_over_hs",
-    "ai_replacement_risk_0_100",
-    "near_term_ai_risk_0_100",
-    "career_market_stress_0_100",
-    "financial_roi_stress_0_100",
-    "overall_cooked_0_100",
-  ] as const;
-  for (const k of pass) {
-    if (k in o) out[k] = o[k];
-  }
+  if ("research_complete" in o) out.research_complete = o.research_complete;
 
   const reportNumbers = asObject(o.report_numbers);
   if (Object.keys(reportNumbers).length > 0) {
     out.report_numbers = reportNumbers;
+    // Mirror only from canonical report_numbers so spoken numbers match the report UI exactly.
+    const canonical = [
+      "currency_code",
+      "grade",
+      "grade_score",
+      "estimated_tuition",
+      "tuition_web_estimate",
+      "tuition_if_invested",
+      "tuition_opportunity_gap",
+      "avg_salary_for_degree",
+      "avg_salary_for_role",
+      "median_salary_for_role",
+      "salary_range_low",
+      "salary_range_high",
+      "degree_roi_rank",
+      "job_market_trend",
+      "ai_replacement_risk_0_100",
+      "near_term_ai_risk_0_100",
+      "career_market_stress_0_100",
+      "financial_roi_stress_0_100",
+      "overall_cooked_0_100",
+    ] as const;
+    for (const k of canonical) {
+      if (k in reportNumbers) out[k] = reportNumbers[k];
+    }
+  } else {
+    // Fallback for older payloads that may not include report_numbers.
+    const legacy = [
+      "grade",
+      "grade_score",
+      "currency_code",
+      "estimated_tuition",
+      "tuition_web_estimate",
+      "tuition_if_invested",
+      "tuition_opportunity_gap",
+      "avg_salary_for_degree",
+      "avg_salary_for_role",
+      "median_salary_for_role",
+      "salary_range_low",
+      "salary_range_high",
+      "degree_roi_rank",
+      "job_market_trend",
+      "ai_replacement_risk_0_100",
+      "near_term_ai_risk_0_100",
+      "career_market_stress_0_100",
+      "financial_roi_stress_0_100",
+      "overall_cooked_0_100",
+    ] as const;
+    for (const k of legacy) {
+      if (k in o) out[k] = o[k];
+    }
   }
 
   const tips = Array.isArray(o.safeguard_tips)

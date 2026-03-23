@@ -344,12 +344,8 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
     await store.append_voice_activity(
         req.session_id,
         event="webhook_research_complete",
-        title=f"All set — grade {grade}",
-        detail=_truncate(
-            research.honest_take
-            or research.ai_risk_reasoning
-            or "Your report card is ready. Donald has what he needs to roast you fairly."
-        ),
+        title="Numbers are back",
+        detail="Donald has your snapshot. Full breakdown is on the report page.",
         data=_voice_research_complete_payload(research, grade, score),
     )
 
@@ -359,6 +355,7 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         "agent_note": (
             "This tool result is the full research output. Pipeline finished successfully. "
             "When stating ANY number the user will also see on their report card, use **report_numbers** below with **report_numbers.currency_code** — do not round differently or swap median vs average. "
+            "Treat any numbers inside ai_risk_reasoning or honest_take as narrative context only; for spoken figures always read from report_numbers. "
             "Phase 3: roast monologue using grade and fields below — start immediately; do NOT ask the user to confirm research. "
             "Phase 4: explain safeguard_tips as ordered top moves — what to do + brief why each matters for this user; close with 'if you only do one thing…' (paraphrase; do not invent tips). "
             "Then save_roast_quote with your best roast one-liner from Phase 3 only, then follow-ups."
