@@ -8,6 +8,10 @@ from google.cloud.firestore_v1.async_client import AsyncClient
 from google.cloud.firestore import Client as SyncClient
 
 from backend.models import Session, UserProfile, ResearchData, ReportCard, VoiceActivityItem
+from backend.services.public_metrics_service import (
+    apply_report_card_update_async,
+    apply_report_card_update_sync,
+)
 
 
 COLLECTION = "sessions"
@@ -99,6 +103,7 @@ class AsyncSessionRepository:
             return
         session.report_card = report_card
         await self.save(session)
+        await apply_report_card_update_async(session_id, report_card)
 
     async def update_roast_quote(self, session_id: str, quote: str) -> None:
         session = await self.get(session_id)
@@ -170,3 +175,4 @@ class SyncSessionRepository:
             return
         session.report_card = report_card
         self.save(session)
+        apply_report_card_update_sync(session_id, report_card)

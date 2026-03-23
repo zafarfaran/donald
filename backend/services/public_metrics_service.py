@@ -12,6 +12,7 @@ from backend.models import ReportCard, ResearchData, Session, UserProfile
 METRICS_COLLECTION = "public_metrics"
 METRICS_DOC_ID = "homepage"
 SESSIONS_COLLECTION = "sessions"
+CONTRIB_COLLECTION = "public_metrics_contrib"
 
 
 def _session_to_firestore_doc(session: Session) -> dict[str, Any]:
@@ -50,6 +51,9 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
     total = len(cards)
     if total == 0:
         return {
+            "total_cards": 0,
+            "c_or_worse_count": 0,
+            "regret_sum_0_5": 0.0,
             "degrees_cooked": 0,
             "c_or_worse_pct": 0.0,
             "tuition_in_shambles_usd": 0,
@@ -87,7 +91,12 @@ def _compute_from_cards(cards: list[ReportCard]) -> dict[str, Any]:
     pct = round((c_or_worse / total) * 100, 1)
     regret = round(sum(regret_samples) / len(regret_samples), 1) if regret_samples else 0.0
 
+    regret_sum = round(sum(regret_samples), 4) if regret_samples else 0.0
+
     return {
+        "total_cards": total,
+        "c_or_worse_count": c_or_worse,
+        "regret_sum_0_5": regret_sum,
         "degrees_cooked": total,
         "c_or_worse_pct": pct,
         "tuition_in_shambles_usd": tuition_in_shambles,
@@ -127,6 +136,64 @@ async def _collect_report_cards(store) -> list[ReportCard]:
     return cards
 
 
+def _card_contribution(card: ReportCard) -> dict[str, Any]:
+    grade = (card.grade or "").strip().upper()
+    c_or_worse = 1 if grade in {"C", "D", "F"} else 0
+
+    r = card.research
+    gap = _safe_int(r.tuition_opportunity_gap)
+    if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
+        gap = int(r.tuition_if_invested - r.estimated_tuition)
+    tuition_gap = gap if (gap is not None and gap > 0) else 0
+
+    cooked = _safe_int(r.overall_cooked_0_100)
+    if cooked is None:
+        cooked = _safe_int(r.ai_replacement_risk_0_100) or 50
+    regret = max(0.0, min(5.0, cooked / 20.0))
+
+    return {
+        "total_cards": 1,
+        "c_or_worse_count": c_or_worse,
+        "tuition_in_shambles_usd": int(tuition_gap),
+        "regret_sum_0_5": float(regret),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _render_aggregate_snapshot(
+    *,
+    total_cards: int,
+    c_or_worse_count: int,
+    tuition_in_shambles_usd: int,
+    regret_sum_0_5: float,
+    updated_at: str,
+) -> dict[str, Any]:
+    total = max(0, int(total_cards))
+    c_count = max(0, min(total, int(c_or_worse_count)))
+    tuition = max(0, int(tuition_in_shambles_usd))
+    regret_sum = max(0.0, float(regret_sum_0_5))
+
+    pct = round((c_count / total) * 100, 1) if total else 0.0
+    regret = round(regret_sum / total, 1) if total else 0.0
+
+    return {
+        "total_cards": total,
+        "c_or_worse_count": c_count,
+        "regret_sum_0_5": round(regret_sum, 4),
+        "degrees_cooked": total,
+        "c_or_worse_pct": pct,
+        "tuition_in_shambles_usd": tuition,
+        "regret_score_0_5": regret,
+        "updated_at": updated_at,
+        "display": {
+            "degrees_cooked": f"{total:,}+",
+            "c_or_worse_pct": f"{round(pct)}%",
+            "tuition_in_shambles": _format_compact_usd(tuition),
+            "regret_score": f"{regret:.1f}/5",
+        },
+    }
+
+
 async def _read_metrics_snapshot() -> dict[str, Any] | None:
     db = get_async_firestore()
     if not db:
@@ -147,14 +214,155 @@ async def _write_metrics_snapshot(snapshot: dict[str, Any]) -> None:
     await db.collection(METRICS_COLLECTION).document(METRICS_DOC_ID).set(snapshot)
 
 
+def _rebuild_contrib_docs_sync(cards: list[ReportCard]) -> None:
+    db = get_sync_firestore()
+    if not db:
+        return
+    batch = db.batch()
+    for i, card in enumerate(cards):
+        contrib = _card_contribution(card)
+        ref = db.collection(CONTRIB_COLLECTION).document(card.session_id)
+        batch.set(ref, contrib)
+        if (i + 1) % 400 == 0:
+            batch.commit()
+            batch = db.batch()
+    batch.commit()
+
+
+def _apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> dict[str, Any] | None:
+    db = get_sync_firestore()
+    if not db:
+        return None
+
+    try:
+        from google.cloud import firestore as gcfirestore
+    except Exception:
+        return None
+
+    metrics_ref = db.collection(METRICS_COLLECTION).document(METRICS_DOC_ID)
+    contrib_ref = db.collection(CONTRIB_COLLECTION).document(session_id)
+    new_contrib = _card_contribution(report_card)
+    tx = db.transaction()
+
+    @gcfirestore.transactional
+    def _txn(transaction):
+        metrics_snap = metrics_ref.get(transaction=transaction)
+        contrib_snap = contrib_ref.get(transaction=transaction)
+        metrics = metrics_snap.to_dict() or {}
+        old = contrib_snap.to_dict() or {}
+
+        base_total = int(metrics.get("total_cards") or metrics.get("degrees_cooked") or 0)
+        base_c = int(metrics.get("c_or_worse_count") or 0)
+        if base_c == 0 and base_total > 0 and "c_or_worse_pct" in metrics:
+            try:
+                base_c = int(round((float(metrics.get("c_or_worse_pct") or 0.0) / 100.0) * base_total))
+            except Exception:
+                base_c = 0
+
+        base_tuition = int(metrics.get("tuition_in_shambles_usd") or 0)
+        base_regret_sum = float(metrics.get("regret_sum_0_5") or 0.0)
+        if base_regret_sum == 0.0 and base_total > 0 and "regret_score_0_5" in metrics:
+            try:
+                base_regret_sum = float(metrics.get("regret_score_0_5") or 0.0) * base_total
+            except Exception:
+                base_regret_sum = 0.0
+
+        next_total = base_total + int(new_contrib["total_cards"]) - int(old.get("total_cards") or 0)
+        next_c = base_c + int(new_contrib["c_or_worse_count"]) - int(old.get("c_or_worse_count") or 0)
+        next_tuition = base_tuition + int(new_contrib["tuition_in_shambles_usd"]) - int(old.get("tuition_in_shambles_usd") or 0)
+        next_regret_sum = base_regret_sum + float(new_contrib["regret_sum_0_5"]) - float(old.get("regret_sum_0_5") or 0.0)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        snapshot = _render_aggregate_snapshot(
+            total_cards=max(0, next_total),
+            c_or_worse_count=max(0, next_c),
+            tuition_in_shambles_usd=max(0, next_tuition),
+            regret_sum_0_5=max(0.0, next_regret_sum),
+            updated_at=now_iso,
+        )
+
+        bootstrap_bits = {
+            k: metrics[k]
+            for k in (
+                "bootstrap_fake_seed_done",
+                "bootstrap_fake_seed_count",
+                "bootstrap_fake_seeded_at",
+            )
+            if k in metrics
+        }
+        payload = {**snapshot, **bootstrap_bits}
+        transaction.set(metrics_ref, payload, merge=True)
+        transaction.set(contrib_ref, new_contrib)
+        return payload
+
+    return _txn(tx)
+
+
+async def apply_report_card_update_async(session_id: str, report_card: ReportCard) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_apply_report_card_update_sync, session_id, report_card)
+
+
+def apply_report_card_update_sync(session_id: str, report_card: ReportCard) -> dict[str, Any] | None:
+    return _apply_report_card_update_sync(session_id, report_card)
+
+
+def apply_report_card_update_memory(store, session_id: str, report_card: ReportCard) -> dict[str, Any]:
+    contribs = getattr(store, "_metrics_contrib", None)
+    if not isinstance(contribs, dict):
+        contribs = {}
+        setattr(store, "_metrics_contrib", contribs)
+
+    snapshot = getattr(store, "_metrics_snapshot", None)
+    if not isinstance(snapshot, dict):
+        snapshot = _render_aggregate_snapshot(
+            total_cards=0,
+            c_or_worse_count=0,
+            tuition_in_shambles_usd=0,
+            regret_sum_0_5=0.0,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    old = contribs.get(session_id) or {
+        "total_cards": 0,
+        "c_or_worse_count": 0,
+        "tuition_in_shambles_usd": 0,
+        "regret_sum_0_5": 0.0,
+    }
+    new = _card_contribution(report_card)
+
+    next_snapshot = _render_aggregate_snapshot(
+        total_cards=int(snapshot.get("total_cards") or 0) + int(new["total_cards"]) - int(old.get("total_cards") or 0),
+        c_or_worse_count=int(snapshot.get("c_or_worse_count") or 0) + int(new["c_or_worse_count"]) - int(old.get("c_or_worse_count") or 0),
+        tuition_in_shambles_usd=int(snapshot.get("tuition_in_shambles_usd") or 0)
+        + int(new["tuition_in_shambles_usd"])
+        - int(old.get("tuition_in_shambles_usd") or 0),
+        regret_sum_0_5=float(snapshot.get("regret_sum_0_5") or 0.0)
+        + float(new["regret_sum_0_5"])
+        - float(old.get("regret_sum_0_5") or 0.0),
+        updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    contribs[session_id] = new
+    setattr(store, "_metrics_snapshot", next_snapshot)
+    return next_snapshot
+
+
 async def recompute_public_metrics(store) -> dict[str, Any]:
     cards = await _collect_report_cards(store)
     snapshot = _compute_from_cards(cards)
-    await _write_metrics_snapshot(snapshot)
+    if getattr(store, "uses_firestore", False):
+        await _write_metrics_snapshot(snapshot)
+        await asyncio.to_thread(_rebuild_contrib_docs_sync, cards)
+    else:
+        setattr(store, "_metrics_snapshot", snapshot)
+        setattr(store, "_metrics_contrib", {c.session_id: _card_contribution(c) for c in cards})
     return snapshot
 
 
 async def get_public_metrics(store) -> dict[str, Any]:
+    if not getattr(store, "uses_firestore", False):
+        mem_snap = getattr(store, "_metrics_snapshot", None)
+        if isinstance(mem_snap, dict) and "display" in mem_snap:
+            return mem_snap
     snap = await _read_metrics_snapshot()
     if isinstance(snap, dict) and "display" in snap:
         return snap

@@ -4,6 +4,7 @@ from datetime import datetime
 from backend.database import get_async_firestore
 from backend.models import Session, UserProfile, ResearchData, ReportCard, VoiceActivityItem
 from backend.repositories.session_repo import AsyncSessionRepository
+from backend.services.public_metrics_service import apply_report_card_update_memory
 
 
 class SessionStore:
@@ -54,6 +55,7 @@ class SessionStore:
         session = self._memory.get(session_id)
         if session:
             session.report_card = report_card
+            apply_report_card_update_memory(self, session_id, report_card)
 
     async def update_roast_quote(self, session_id: str, quote: str) -> None:
         if self._repo:
