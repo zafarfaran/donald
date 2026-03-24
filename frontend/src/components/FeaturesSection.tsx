@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BurningCapIcon, MoneyBurningIcon, CrackingDiplomaIcon } from "./icons";
+import { BurningCapIcon, MoneyBurningIcon, CrackingDiplomaIcon, GavelIcon } from "./icons";
 
 const features = [
   {
@@ -22,6 +22,12 @@ const features = [
     desc: "Valid, Mid, Cooked — one label for how AI sees your job.",
     color: "var(--red)",
   },
+  {
+    icon: GavelIcon,
+    title: "Stay-ahead game plan",
+    desc: "No fluff. Concrete moves to avoid being replaced by AI.",
+    color: "var(--gold)",
+  },
 ];
 
 export default function FeaturesSection() {
@@ -33,7 +39,7 @@ export default function FeaturesSection() {
           <h2 className="font-display text-3xl md:text-4xl mt-2">What you <em>get</em></h2>
         </motion.div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {features.map((f, i) => (
             <motion.div key={f.title} initial={{ opacity: 0, y: 28 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-60px" }} transition={{ duration: 0.5, delay: i * 0.12 }}
               whileHover={{ y: -4 }}

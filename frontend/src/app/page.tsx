@@ -69,7 +69,7 @@ export default function Home() {
 
             <motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.0 }}
               className="mt-6 text-[var(--subtle)] text-sm md:text-base max-w-md mx-auto lg:mx-0 font-light leading-relaxed">
-              Voice real talk + salary &amp; AI risk data. <span className="text-[var(--gold)]">No signup.</span>
+              Donald roasts you with facts, then tells you how to stay ahead of AI. <span className="text-[var(--gold)]">No signup.</span>
             </motion.p>
 
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.25 }}
