@@ -154,10 +154,100 @@ class PublicReview(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+class CVHighlight(BaseModel):
+    """One specific issue found in the CV with the exact text to fix."""
+
+    original_text: str = Field(
+        ..., description="Exact substring from the CV that needs attention."
+    )
+    suggested_text: str = Field(
+        ..., description="Replacement text (may be empty if the fix is 'remove this')."
+    )
+    reason: str = Field(
+        ..., description="Why this change matters — one or two sentences."
+    )
+    severity: str = Field(
+        default="suggestion",
+        description="critical | important | suggestion",
+    )
+    section: str = Field(
+        default="",
+        description="Which CV section this belongs to (e.g. Summary, Experience, Skills).",
+    )
+
+
+class CVSectionFeedback(BaseModel):
+    """Feedback for one logical section of the CV."""
+
+    name: str = Field(..., description="Section heading as found in the CV.")
+    score_0_10: int = Field(
+        default=5, description="Quality score 0 (awful) – 10 (perfect)."
+    )
+    summary: str = Field(
+        default="", description="One-paragraph assessment of this section."
+    )
+    highlights: list[CVHighlight] = Field(default_factory=list)
+
+
+class CVEducation(BaseModel):
+    """One education entry extracted from the CV."""
+
+    degree: str = ""
+    institution: str = ""
+    year: str = ""
+
+
+class CVExperienceEntry(BaseModel):
+    """One work experience entry extracted from the CV."""
+
+    title: str = ""
+    company: str = ""
+    dates: str = ""
+    summary: str = ""
+
+
+class CVAnalysis(BaseModel):
+    """Full Claude analysis of an uploaded CV."""
+
+    candidate_name: str = Field(default="", description="Name detected from the CV, if present.")
+    candidate_email: str = Field(default="", description="Email from the CV.")
+    candidate_phone: str = Field(default="", description="Phone from the CV.")
+    candidate_location: str = Field(default="", description="Location from the CV.")
+    current_role: str = Field(default="", description="Most recent job title.")
+    current_company: str = Field(default="", description="Most recent employer.")
+    experience_years: int = Field(default=0, description="Estimated years of experience.")
+    education: list[CVEducation] = Field(default_factory=list)
+    skills: list[str] = Field(default_factory=list, description="Key skills/tools extracted.")
+    experience_entries: list[CVExperienceEntry] = Field(default_factory=list)
+    cv_text: str = Field(default="", description="Extracted plain text of the CV.")
+    overall_score_0_100: int = Field(default=50)
+    overall_summary: str = Field(
+        default="",
+        description="2-3 sentence executive summary of the CV quality.",
+    )
+    strengths: list[str] = Field(default_factory=list)
+    top_actions: list[str] = Field(
+        default_factory=list,
+        description="Prioritised list of the most impactful changes to make.",
+    )
+    sections: list[CVSectionFeedback] = Field(default_factory=list)
+    highlights: list[CVHighlight] = Field(
+        default_factory=list,
+        description="All highlights across sections, flattened for easy rendering.",
+    )
+    coaching_notes: str = Field(
+        default="",
+        description="Extended coaching advice Donald can narrate.",
+    )
+    file_name: str = ""
+    analyzed_at: datetime = Field(default_factory=datetime.now)
+
+
 class Session(BaseModel):
     session_id: str
     profile: UserProfile
     research: ResearchData | None = None
     report_card: ReportCard | None = None
+    cv_analysis: CVAnalysis | None = None
     created_at: datetime
     voice_activity: list[VoiceActivityItem] = Field(default_factory=list)

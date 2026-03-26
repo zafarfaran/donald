@@ -30,6 +30,7 @@ from backend.routers import (
     convai,
     public_metrics,
     reviews,
+    cv,
 )
 
 configure_logging()
@@ -94,6 +95,7 @@ app.include_router(webhooks.router)
 app.include_router(convai.router)
 app.include_router(public_metrics.router)
 app.include_router(reviews.router)
+app.include_router(cv.router)
 
 if not (os.getenv("OTEL_SDK_DISABLED") or "").strip().lower() in ("1", "true", "yes") and (
     os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or ""

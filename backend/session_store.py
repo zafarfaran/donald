@@ -3,6 +3,7 @@ from datetime import datetime
 
 from backend.database import get_async_firestore
 from backend.models import (
+    CVAnalysis,
     Session,
     UserProfile,
     ResearchData,
@@ -72,6 +73,14 @@ class SessionStore:
         session = self._memory.get(session_id)
         if session and session.report_card:
             session.report_card.roast_quote = quote
+
+    async def update_cv_analysis(self, session_id: str, cv_analysis: CVAnalysis) -> None:
+        if self._repo:
+            await self._repo.update_cv_analysis(session_id, cv_analysis)
+            return
+        session = self._memory.get(session_id)
+        if session:
+            session.cv_analysis = cv_analysis
 
     async def patch_profile(self, session_id: str, updates: dict) -> bool:
         if self._repo:

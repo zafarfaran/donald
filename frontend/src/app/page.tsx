@@ -16,9 +16,9 @@ import { BurningCapIcon } from "@/components/icons";
 const headlineEase = [0.22, 1, 0.36, 1] as [number, number, number, number];
 
 function AnimatedHeadline() {
-  const line1 = ["Is", "your", "degree", "cooked?"];
-  const line2 = ["Is", "AI", "gonna", "make", "you", "jobless?"];
-  const gradientWords = new Set(["cooked?", "jobless?"]);
+  const line1 = ["Is", "AI", "coming", "for", "your", "job?"];
+  const line2 = ["Find", "out.", "Then", "career", "max."];
+  const gradientWords = new Set(["job?", "max."]);
 
   const renderWords = (words: string[], baseDelay: number) =>
     words.map((word, i) => {
@@ -69,7 +69,7 @@ export default function Home() {
 
             <motion.p initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.0 }}
               className="mt-6 text-[var(--subtle)] text-sm md:text-base max-w-md mx-auto lg:mx-0 font-light leading-relaxed">
-              Donald roasts you with facts, then tells you how to stay ahead of AI. <span className="text-[var(--gold)]">No signup.</span>
+              Donald roasts your degree with receipts, then tells you how to career max and stay ahead of AI. <span className="text-[var(--gold)]">No signup.</span>
             </motion.p>
 
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 1.25 }}

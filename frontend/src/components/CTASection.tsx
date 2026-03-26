@@ -13,7 +13,7 @@ export default function CTASection() {
       <div className="relative max-w-lg mx-auto text-center">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }}>
           <span className="text-[var(--gold)] text-xs font-semibold tracking-[0.2em] uppercase">Your turn</span>
-          <h2 className="font-display text-3xl md:text-4xl mt-2 mb-6">Get <em>cooked</em></h2>
+          <h2 className="font-display text-3xl md:text-4xl mt-2 mb-6">Get roasted. <em>Get a plan.</em></h2>
           <motion.button
             onClick={() => router.push("/roast")}
             whileHover={{ scale: 1.03 }}

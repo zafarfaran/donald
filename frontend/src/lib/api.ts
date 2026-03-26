@@ -1,4 +1,36 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+/**
+ * - If NEXT_PUBLIC_API_URL is unset: demo mode (mocks); server-side fallbacks use INTERNAL_API_URL.
+ * - If it points at the same origin as this Next app (e.g. you pasted your ngrok frontend URL), use
+ *   same-origin `/api/*` so next.config rewrites proxy to FastAPI (otherwise POST /api/session 404s on Next).
+ * - Otherwise: direct to that backend URL.
+ */
+function resolveApiBase(): string {
+  const raw = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  const serverFallback = (process.env.INTERNAL_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+
+  if (!raw) {
+    return typeof window === "undefined" ? serverFallback : "";
+  }
+
+  let base = raw.replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(base)) {
+    base = `http://${base}`;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      if (new URL(base).origin === window.location.origin) {
+        return "";
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return base;
+}
+
+const API_URL = resolveApiBase();
 const DEMO_MODE = !process.env.NEXT_PUBLIC_API_URL;
 
 // ── Mock data for demo mode (no backend needed) ──
@@ -310,6 +342,153 @@ export async function fetchVoiceActivity(sessionId: string): Promise<VoiceActivi
     };
   }
 }
+
+// ── CV Coach ──
+
+export type CVFix = {
+  original_text: string;
+  suggested_text: string;
+  severity: "critical" | "important" | "suggestion";
+  section: string;
+};
+
+export type CVEducation = {
+  degree: string;
+  institution: string;
+  year?: string;
+};
+
+export type CVExperienceEntry = {
+  title: string;
+  company: string;
+  dates?: string;
+  summary?: string;
+};
+
+export type CVSectionFeedback = {
+  name: string;
+  score_0_10?: number;
+  summary?: string;
+};
+
+export type CVAnalysisResult = {
+  candidate_name?: string;
+  candidate_email?: string;
+  candidate_phone?: string;
+  candidate_location?: string;
+  current_role?: string;
+  current_company?: string;
+  experience_years?: number;
+  education?: CVEducation[];
+  skills?: string[];
+  experience_entries?: CVExperienceEntry[];
+  cv_text?: string;
+  overall_score_0_100: number;
+  overall_summary: string;
+  strengths: string[];
+  top_actions: string[];
+  sections?: CVSectionFeedback[];
+  highlights: CVFix[];
+  coaching_notes: string;
+  file_name: string;
+};
+
+export async function uploadCV(
+  file: File,
+  sessionId?: string,
+): Promise<{ analysis: CVAnalysisResult; session_id: string | null }> {
+  if (DEMO_MODE) {
+    await new Promise((r) => setTimeout(r, 1500));
+    return { analysis: MOCK_CV_ANALYSIS, session_id: null };
+  }
+  const form = new FormData();
+  form.append("file", file);
+  const url = sessionId
+    ? `${API_URL}/api/cv/upload?session_id=${encodeURIComponent(sessionId)}`
+    : `${API_URL}/api/cv/upload`;
+  const res = await fetch(url, { method: "POST", body: form });
+  const data = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok) {
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : `CV upload failed (HTTP ${res.status})`,
+    );
+  }
+  return data as { analysis: CVAnalysisResult; session_id: string | null };
+}
+
+const MOCK_CV_ANALYSIS: CVAnalysisResult = {
+  candidate_name: "Jane Doe",
+  candidate_email: "jane@example.com",
+  candidate_phone: "+1 555-0123",
+  candidate_location: "New York, NY",
+  current_role: "Marketing Coordinator",
+  current_company: "Acme Corp",
+  experience_years: 3,
+  education: [
+    { degree: "BA Communications", institution: "State University", year: "2021" },
+  ],
+  skills: ["Microsoft Office", "Teamwork", "Email Marketing", "Social Media"],
+  experience_entries: [
+    {
+      title: "Marketing Coordinator",
+      company: "Acme Corp",
+      dates: "2021 – Present",
+      summary: "Managed email campaigns and social media accounts.",
+    },
+    {
+      title: "Marketing Intern",
+      company: "StartupXYZ",
+      dates: "2020 – 2021",
+      summary: "Assisted with content creation and analytics reporting.",
+    },
+  ],
+  cv_text:
+    "Jane Doe\njane@example.com\n\nExperience\n- Helped with email marketing\n\nSkills\n- Microsoft Office\n- Teamwork\n",
+  overall_score_0_100: 35,
+  overall_summary:
+    "Recruiter would spend 4 seconds on this. No numbers, no outcomes, no differentiation.",
+  strengths: [
+    "Clean chronological layout",
+    "Contact info present and complete",
+  ],
+  top_actions: [
+    "Generic objective wastes prime space → Replace with 2-line summary naming your niche and biggest win",
+    "Zero metrics in experience bullets → Add follower growth %, open rates, revenue driven",
+    "'Microsoft Office' and 'Teamwork' are filler → List real tools: HubSpot, GA, Hootsuite",
+    "No achievements section → Add 2-3 quantified highlights above Experience",
+  ],
+  highlights: [
+    {
+      original_text: "Generic objective statement",
+      suggested_text: "Write a 2-line professional summary with your niche + top result",
+      severity: "critical",
+      section: "Objective",
+    },
+    {
+      original_text: "Experience bullets list duties not outcomes",
+      suggested_text: "Add numbers: '40% follower growth', '$2M pipeline', '27% open rate'",
+      severity: "important",
+      section: "Experience",
+    },
+    {
+      original_text: "'Helped with email marketing'",
+      suggested_text: "Own it: 'Designed weekly campaigns for 15k subscribers'",
+      severity: "critical",
+      section: "Experience",
+    },
+    {
+      original_text: "Skills section is filler words",
+      suggested_text: "Replace with specific, searchable tools and certifications",
+      severity: "important",
+      section: "Skills",
+    },
+  ],
+  coaching_notes:
+    "Your CV reads like a job description, not a highlight reel. You listed duties instead of wins. One evening adding real numbers could take this from a 35 to a 70.",
+  file_name: "demo_cv.pdf",
+};
 
 /** Browser → \`get_user_profile\` webhook (LinkedIn/manual sessions with stored profile). Voice flow does not use this. */
 export async function webhookGetUserProfile(sessionId: string): Promise<{ ok: boolean; error?: string }> {

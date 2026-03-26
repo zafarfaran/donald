@@ -11,11 +11,14 @@ logger = structlog.get_logger(__name__)
 
 
 @shared_task(bind=True, name="research.run_session", max_retries=1, default_retry_delay=30)
-def run_session_research(self, session_id: str, profile_dict: dict) -> dict:
+def run_session_research(
+    self, session_id: str, profile_dict: dict, lease: dict | None = None
+) -> dict:
     from backend.database import get_sync_firestore
     from backend.models import ResearchData, UserProfile
     from backend.repositories.session_repo import SyncSessionRepository
     from backend.services.firecrawl_service import run_research
+    from backend.services.research_concurrency import release_lease_sync
     from backend.services.research_outcome import (
         apply_cooked_components,
         grade_and_report_card,
@@ -39,21 +42,24 @@ def run_session_research(self, session_id: str, profile_dict: dict) -> dict:
         )
 
     try:
-        research = asyncio.run(_run())
-    except Exception as exc:
-        logger.exception("run_research failed for session %s", session_id[:8])
-        raise self.retry(exc=exc) from exc
+        try:
+            research = asyncio.run(_run())
+        except Exception as exc:
+            logger.exception("run_research failed for session %s", session_id[:8])
+            raise self.retry(exc=exc) from exc
 
-    research = apply_cooked_components(research)
-    grade, score, report_card = grade_and_report_card(session_id, p, research)
+        research = apply_cooked_components(research)
+        grade, score, report_card = grade_and_report_card(session_id, p, research)
 
-    db = get_sync_firestore()
-    if db:
-        repo = SyncSessionRepository(db)
-        repo.update_research(session_id, research)
-        repo.update_report_card(session_id, report_card)
+        db = get_sync_firestore()
+        if db:
+            repo = SyncSessionRepository(db)
+            repo.update_research(session_id, research)
+            repo.update_report_card(session_id, report_card)
 
-    return research_result_to_dict(research, grade, score, report_card)
+        return research_result_to_dict(research, grade, score, report_card)
+    finally:
+        release_lease_sync(lease)
 
 
 def parse_task_result(payload: dict):

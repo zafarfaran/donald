@@ -47,6 +47,17 @@ def _safe_int(v: Any) -> int | None:
     return n
 
 
+def _tuition_gap_positive_usd(card: ReportCard) -> int:
+    """Opportunity-cost gap for one card (same as contrib + aggregate). Not FX-normalized; field name is legacy USD."""
+    r = card.research
+    gap = _safe_int(r.tuition_opportunity_gap)
+    if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
+        gap = int(r.tuition_if_invested - r.estimated_tuition)
+    if gap is not None and gap > 0:
+        return int(gap)
+    return 0
+
+
 def _normalize_regret_sum_0_5(
     *,
     total_cards: int,
@@ -154,13 +165,9 @@ def _compute_from_cards(cards: list[ReportCard], *, people_count: int | None = N
         if grade in {"C", "D", "F"}:
             c_or_worse += 1
 
-        r = card.research
-        gap = _safe_int(r.tuition_opportunity_gap)
-        if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
-            gap = int(r.tuition_if_invested - r.estimated_tuition)
-        if gap is not None and gap > 0:
-            tuition_in_shambles += gap
+        tuition_in_shambles += _tuition_gap_positive_usd(card)
 
+        r = card.research
         cooked = _safe_int(r.overall_cooked_0_100)
         if cooked is None:
             cooked = _safe_int(r.ai_replacement_risk_0_100) or 50
@@ -216,6 +223,19 @@ async def _collect_report_cards(store) -> list[ReportCard]:
     return cards
 
 
+async def _overlay_tuition_calculated_from_report_cards(store, canonical: dict[str, Any]) -> None:
+    """
+    Replace tuition_in_shambles with a sum over all report cards (gap or invested minus tuition).
+    Does not read the cached aggregate field — source of truth is session report_card payloads.
+    """
+    cards = await _collect_report_cards(store)
+    live = sum(_tuition_gap_positive_usd(c) for c in cards)
+    canonical["tuition_in_shambles_usd"] = int(live)
+    disp = canonical.get("display")
+    if isinstance(disp, dict):
+        disp["tuition_in_shambles"] = _format_compact_usd(int(live))
+
+
 async def _count_sessions(store) -> int:
     if getattr(store, "uses_firestore", False):
         db = get_async_firestore()
@@ -233,12 +253,9 @@ def _card_contribution(card: ReportCard) -> dict[str, Any]:
     grade = (card.grade or "").strip().upper()
     c_or_worse = 1 if grade in {"C", "D", "F"} else 0
 
-    r = card.research
-    gap = _safe_int(r.tuition_opportunity_gap)
-    if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
-        gap = int(r.tuition_if_invested - r.estimated_tuition)
-    tuition_gap = gap if (gap is not None and gap > 0) else 0
+    tuition_gap = _tuition_gap_positive_usd(card)
 
+    r = card.research
     cooked = _safe_int(r.overall_cooked_0_100)
     if cooked is None:
         cooked = _safe_int(r.ai_replacement_risk_0_100) or 50
@@ -477,6 +494,7 @@ async def get_public_metrics(store) -> dict[str, Any]:
             canonical["people_talked_to_donald"] = max(0, int(people_count))
             canonical.setdefault("display", {})
             canonical["display"]["people_talked_to_donald"] = f"{max(0, int(people_count)):,}+"
+            await _overlay_tuition_calculated_from_report_cards(store, canonical)
             setattr(store, "_metrics_snapshot", canonical)
             return canonical
     snap = await _read_metrics_snapshot()
@@ -488,6 +506,7 @@ async def get_public_metrics(store) -> dict[str, Any]:
         # Self-heal legacy snapshots in Firestore when canonical values changed.
         if canonical != snap:
             await _write_metrics_snapshot(canonical)
+        await _overlay_tuition_calculated_from_report_cards(store, canonical)
         return canonical
     return await recompute_public_metrics(store)
 

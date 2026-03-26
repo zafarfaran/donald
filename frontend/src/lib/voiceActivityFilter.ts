@@ -4,7 +4,7 @@ export type ActivityRowFilterInput = {
   title: string;
 };
 
-/** Events shown in the Activity sidebar: your speech, research pipeline, and tool calls. */
+/** Events shown in the Activity sidebar: your speech, research pipeline, tool calls, and CV coaching. */
 const IMPORTANT_EVENTS = new Set([
   "transcript",
   "webrtc_ready",
@@ -14,6 +14,9 @@ const IMPORTANT_EVENTS = new Set([
   "webhook_research_started",
   "webhook_research_complete",
   "webhook_save_roast_quote",
+  "cv_upload",
+  "cv_ready",
+  "cv_error",
   "error",
   "disconnect",
 ]);

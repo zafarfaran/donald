@@ -10,6 +10,18 @@ from backend.redis_client import get_async_redis
 VOICE_DAILY_MAX_SESSIONS = int((os.getenv("VOICE_DAILY_MAX_SESSIONS") or "3").strip())
 
 
+def voice_limits_disabled() -> bool:
+    return (os.getenv("VOICE_LIMITS_DISABLED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ) or (os.getenv("RATE_LIMIT_DISABLED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
 def _client_id(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
@@ -38,6 +50,9 @@ async def consume_voice_session_for_today(
     Consume one voice session for this client for the current UTC day.
     Returns (allowed, retry_after_seconds).
     """
+    if voice_limits_disabled():
+        return True, 0
+
     now = datetime.now(timezone.utc)
     day = _utc_day(now)
     retry_after = _seconds_until_next_utc_day(now)

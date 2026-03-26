@@ -54,7 +54,7 @@ export default function BubblyVoiceAnimation() {
           animate={{ y: [0, -4, 0], scale: [1, 1.02, 1] }}
           transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
         >
-          Live voice
+          Live advice
         </motion.div>
 
         <div className="flex h-14 items-end justify-center gap-1.5 px-4">

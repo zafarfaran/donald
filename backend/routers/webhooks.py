@@ -7,6 +7,10 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from backend.services.firecrawl_service import run_research, resolve_research_query_plan
 from backend.services.money_locale import normalize_currency_code
+from backend.services.research_concurrency import (
+    acquire_research_lease,
+    release_lease_async,
+)
 from backend.services.research_outcome import (
     apply_cooked_components,
     grade_and_report_card,
@@ -312,6 +316,20 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
             "research_complete": False,
             "agent_note": err,
         }
+    allowed, retry_after, detail, lease = await acquire_research_lease(request, req.session_id)
+    if not allowed:
+        retry_hint = f" Try again in about {retry_after} seconds." if retry_after > 0 else ""
+        message = (
+            detail
+            or "Research is already running for your session. Please wait for it to finish."
+        )
+        return {
+            "error": f"{message}{retry_hint}",
+            "research_complete": False,
+            "agent_note": (
+                "Research is currently busy. Ask the user to wait briefly, then retry research_degree."
+            ),
+        }
     # Privacy: voice flow does not merge into session.profile; only report_card holds a snapshot for the UI.
     rq, _, _, _ = resolve_research_query_plan(
         p.degree,
@@ -332,38 +350,41 @@ async def webhook_research(req: ResearchDegreeWebhookRequest, request: Request):
         data=_voice_research_started_payload(p, rq),
     )
     try:
-        research = await asyncio.wait_for(
-            run_research(
-                degree=p.degree,
-                university=p.university,
-                graduation_year=p.graduation_year,
-                current_job=p.current_job,
-                years_experience=p.years_experience,
-                salary=p.salary,
-                country_or_region=p.country_or_region,
-                currency_code=p.currency_code,
-                tuition_paid=p.tuition_paid,
-                tuition_is_total=p.tuition_is_total,
-            ),
-            timeout=VOICE_RESEARCH_DEADLINE_SEC,
-        )
-    except asyncio.TimeoutError:
-        logger.error(
-            "research_degree_timeout",
-            deadline_sec=VOICE_RESEARCH_DEADLINE_SEC,
-            session_prefix=req.session_id[:8],
-        )
-        return {
-            "error": (
-                f"Research timed out after {int(VOICE_RESEARCH_DEADLINE_SEC)} seconds. "
-                "Try again, or set FIRECRAWL_SEARCH_TIMEOUT_MS / VOICE_RESEARCH_DEADLINE_SEC if your network is slow."
-            ),
-            "research_complete": False,
-            "agent_note": (
-                "Research did not finish in time — do not roast with made-up numbers. "
-                "Apologize briefly, ask them to try again, and offer to retry research_degree."
-            ),
-        }
+        try:
+            research = await asyncio.wait_for(
+                run_research(
+                    degree=p.degree,
+                    university=p.university,
+                    graduation_year=p.graduation_year,
+                    current_job=p.current_job,
+                    years_experience=p.years_experience,
+                    salary=p.salary,
+                    country_or_region=p.country_or_region,
+                    currency_code=p.currency_code,
+                    tuition_paid=p.tuition_paid,
+                    tuition_is_total=p.tuition_is_total,
+                ),
+                timeout=VOICE_RESEARCH_DEADLINE_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "research_degree_timeout",
+                deadline_sec=VOICE_RESEARCH_DEADLINE_SEC,
+                session_prefix=req.session_id[:8],
+            )
+            return {
+                "error": (
+                    f"Research timed out after {int(VOICE_RESEARCH_DEADLINE_SEC)} seconds. "
+                    "Try again, or set FIRECRAWL_SEARCH_TIMEOUT_MS / VOICE_RESEARCH_DEADLINE_SEC if your network is slow."
+                ),
+                "research_complete": False,
+                "agent_note": (
+                    "Research did not finish in time — do not roast with made-up numbers. "
+                    "Apologize briefly, ask them to try again, and offer to retry research_degree."
+                ),
+            }
+    finally:
+        await release_lease_async(request, lease)
     research = apply_cooked_components(research)
     await store.update_research(req.session_id, research)
     grade, score, report_card = grade_and_report_card(req.session_id, p, research)

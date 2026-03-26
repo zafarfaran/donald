@@ -18,7 +18,7 @@ export default function Footer() {
           {" · built by "}
           <a href="https://faranz.com" target="_blank" rel="noopener noreferrer" className="text-[var(--fg)] hover:text-[var(--gold)] transition-colors">Faran Z</a>
         </p>
-        <p className="text-[var(--subtle)]/40 text-xs font-light">no degrees were harmed. feelings tho? absolutely.</p>
+        <p className="text-[var(--subtle)]/40 text-xs font-light">roasted first. career maxed second. feelings? not our problem.</p>
       </div>
     </footer>
   );

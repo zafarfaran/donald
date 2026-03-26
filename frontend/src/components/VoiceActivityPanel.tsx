@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { filterActivityForFeed } from "@/lib/voiceActivityFilter";
 import VoiceActivityDataBlock from "@/components/VoiceActivityDataBlock";
+import CvAnalysisBlock from "@/components/CvAnalysisBlock";
 import { isVoiceResearchInProgress } from "@/lib/voiceActivityResearch";
 
 export type VoiceActivityRow = {
@@ -17,14 +18,15 @@ export type VoiceActivityRow = {
 };
 
 function eventIcon(event: string) {
-  if (event.includes("research")) return "🔎";
-  if (event.includes("profile") || event.includes("user_profile")) return "👤";
-  if (event.includes("tool")) return "⚡";
-  if (event.includes("transcript") || event.includes("message")) return "💬";
-  if (event === "error" || event === "disconnect") return "⚠️";
-  if (event.includes("connect") || event.includes("status")) return "📡";
-  if (event.includes("mode")) return "🎙️";
-  return "✦";
+  if (event.includes("cv")) return "\ud83d\udcc4";
+  if (event.includes("research")) return "\ud83d\udd0e";
+  if (event.includes("profile") || event.includes("user_profile")) return "\ud83d\udc64";
+  if (event.includes("tool")) return "\u26a1";
+  if (event.includes("transcript") || event.includes("message")) return "\ud83d\udcac";
+  if (event === "error" || event === "disconnect") return "\u26a0\ufe0f";
+  if (event.includes("connect") || event.includes("status")) return "\ud83d\udce1";
+  if (event.includes("mode")) return "\ud83c\udf99\ufe0f";
+  return "\u2726";
 }
 
 type PanelProps = {
@@ -148,6 +150,9 @@ export default function VoiceActivityPanel({
                     {(row.event === "webhook_research_started" || row.event === "webhook_research_complete") &&
                     row.data ? (
                       <VoiceActivityDataBlock row={row} />
+                    ) : null}
+                    {row.event === "cv_ready" && row.data?.cv_analysis ? (
+                      <CvAnalysisBlock analysis={row.data.cv_analysis as Record<string, unknown>} />
                     ) : null}
                   </div>
                 </div>
