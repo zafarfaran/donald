@@ -8,6 +8,7 @@ from backend.session_id import ensure_session_id
 from backend.services.voice_limits import (
     VOICE_DAILY_MAX_SESSIONS,
     consume_voice_session_for_today,
+    voice_limits_disabled,
 )
 
 router = APIRouter()
@@ -56,15 +57,16 @@ async def get_voice_activity(session_id: str, request: Request):
     session = await request.app.state.store.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    created_at = session.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    age_sec = (datetime.now(timezone.utc) - created_at).total_seconds()
-    if age_sec > VOICE_SESSION_MAX_SECONDS:
-        raise HTTPException(
-            status_code=429,
-            detail="This call has reached the 3-minute daily limit. Please come back tomorrow.",
-        )
+    if not voice_limits_disabled():
+        created_at = session.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        age_sec = (datetime.now(timezone.utc) - created_at).total_seconds()
+        if age_sec > VOICE_SESSION_MAX_SECONDS:
+            raise HTTPException(
+                status_code=429,
+                detail="This call has reached the 3-minute daily limit. Please come back tomorrow.",
+            )
     return {
         "items": [i.model_dump(mode="json") for i in session.voice_activity],
     }

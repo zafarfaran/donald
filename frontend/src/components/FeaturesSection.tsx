@@ -6,26 +6,26 @@ import { BurningCapIcon, MoneyBurningIcon, CrackingDiplomaIcon, GavelIcon } from
 const features = [
   {
     icon: BurningCapIcon,
-    title: "Voice real talk",
-    desc: "Live voice breakdown with real salary & tuition data.",
+    title: "Voice roast + real talk",
+    desc: "Live voice breakdown with real salary & tuition data. Then actual career advice.",
     color: "var(--red)",
   },
   {
     icon: MoneyBurningIcon,
-    title: "AI risk",
-    desc: "How fast automation is moving in your field.",
+    title: "AI risk + market facts",
+    desc: "How fast AI is moving in your field and what the job market actually looks like.",
     color: "var(--gold)",
   },
   {
     icon: CrackingDiplomaIcon,
     title: "One-word verdict",
-    desc: "Valid, Mid, Cooked — one label for how AI sees your job.",
+    desc: "Valid, Mid, Cooked — one label for your degree. Then moves to fix it.",
     color: "var(--red)",
   },
   {
     icon: GavelIcon,
-    title: "Stay-ahead game plan",
-    desc: "No fluff. Concrete moves to avoid being replaced by AI.",
+    title: "Career max game plan",
+    desc: "Concrete next moves to level up, not motivational fluff. Resume, outreach, skills.",
     color: "var(--gold)",
   },
 ];
@@ -36,7 +36,7 @@ export default function FeaturesSection() {
       <div className="max-w-5xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.6 }} className="text-center mb-12">
           <span className="text-[var(--gold)] text-xs font-semibold tracking-[0.2em] uppercase">At a glance</span>
-          <h2 className="font-display text-3xl md:text-4xl mt-2">What you <em>get</em></h2>
+          <h2 className="font-display text-3xl md:text-4xl mt-2">Roast + <em>game plan</em></h2>
         </motion.div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">

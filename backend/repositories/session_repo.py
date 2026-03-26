@@ -7,7 +7,7 @@ from typing import Any
 from google.cloud.firestore_v1.async_client import AsyncClient
 from google.cloud.firestore import Client as SyncClient
 
-from backend.models import Session, UserProfile, ResearchData, ReportCard, VoiceActivityItem
+from backend.models import CVAnalysis, Session, UserProfile, ResearchData, ReportCard, VoiceActivityItem
 from backend.services.public_metrics_service import (
     apply_report_card_update_async,
     apply_report_card_update_sync,
@@ -21,6 +21,7 @@ def _session_dict_to_model(session_id: str, data: dict[str, Any]) -> Session:
     profile = UserProfile.model_validate(data["profile"])
     research = ResearchData.model_validate(data["research"]) if data.get("research") else None
     report_card = ReportCard.model_validate(data["report_card"]) if data.get("report_card") else None
+    cv_analysis = CVAnalysis.model_validate(data["cv_analysis"]) if data.get("cv_analysis") else None
     raw_created = data.get("created_at")
     if isinstance(raw_created, datetime):
         created_at = raw_created
@@ -49,6 +50,7 @@ def _session_dict_to_model(session_id: str, data: dict[str, Any]) -> Session:
         profile=profile,
         research=research,
         report_card=report_card,
+        cv_analysis=cv_analysis,
         created_at=created_at,
         voice_activity=voice_activity,
     )
@@ -59,6 +61,7 @@ def _session_to_firestore_doc(session: Session) -> dict[str, Any]:
         "profile": session.profile.model_dump(mode="json"),
         "research": session.research.model_dump(mode="json") if session.research else None,
         "report_card": session.report_card.model_dump(mode="json") if session.report_card else None,
+        "cv_analysis": session.cv_analysis.model_dump(mode="json") if session.cv_analysis else None,
         "created_at": session.created_at,
         "voice_activity": [i.model_dump(mode="json") for i in session.voice_activity],
     }
@@ -104,6 +107,13 @@ class AsyncSessionRepository:
         session.report_card = report_card
         await self.save(session)
         await apply_report_card_update_async(session_id, report_card)
+
+    async def update_cv_analysis(self, session_id: str, cv_analysis: CVAnalysis) -> None:
+        session = await self.get(session_id)
+        if not session:
+            return
+        session.cv_analysis = cv_analysis
+        await self.save(session)
 
     async def update_roast_quote(self, session_id: str, quote: str) -> None:
         session = await self.get(session_id)

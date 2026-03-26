@@ -11,15 +11,22 @@ import {
   VOICE_RESEARCH_CLIENT_START_TITLE,
 } from "@/lib/voiceActivityResearch";
 import { isVoiceClientToolName } from "@/lib/voiceAgentTools";
+import { uploadCV, type CVAnalysisResult } from "@/lib/api";
 
 // ElevenLabs Client tool names + parameter list: `src/lib/voiceAgentTools.ts`
-// If tools never run: ElevenLabs agent must use **Client** tools, not Webhooks — see `prompts/ELEVENLABS_CLIENT_TOOLS_CHECKLIST.md`.
+// If tools never run: ElevenLabs agent must use **Client** tools, not Webhooks -- see `prompts/ELEVENLABS_CLIENT_TOOLS_CHECKLIST.md`.
 
 interface Props {
   sessionId: string;
   onComplete: () => void;
   /** Live SDK events (tool invocations, transcripts, connection) for the activity panel */
   onSdkActivity?: (row: VoiceActivityRow) => void;
+  /** CV analysis pre-loaded before the call started (from the choose step). */
+  preloadedCv?: CVAnalysisResult | null;
+  /** Auto-start the voice call as soon as component mounts. */
+  autoStart?: boolean;
+  /** Upstream hook so page can render a dedicated CV section. */
+  onCvAnalysis?: (analysis: CVAnalysisResult) => void;
 }
 
 function rid() {
@@ -44,7 +51,7 @@ function userFacingErrorMessage(message: string): string {
     return "Voice credits are exhausted right now. Please try again later.";
   }
   if (/daily voice limit|come back tomorrow|3-minute daily limit|time limit reached/i.test(m)) {
-    return "You hit today’s voice limit. Come back tomorrow for another roast.";
+    return "You hit today's voice limit. Come back tomorrow for another roast.";
   }
   if (/missing\s+error_event|dynamic variables|agent config/i.test(m)) {
     return "Agent config mismatch. Refresh and retry. If it repeats, update the ElevenLabs agent variables.";
@@ -53,9 +60,9 @@ function userFacingErrorMessage(message: string): string {
     m.length > 140 ||
     /\bHTTP\b|401|403|404|500|502|503|ECONNREFUSED|Failed to fetch|NetworkError|JSON|session not found/i.test(m)
   ) {
-    return "We couldn’t finish that. Check your connection and try again.";
+    return "We couldn't finish that. Check your connection and try again.";
   }
-  return m.length > 220 ? `${m.slice(0, 217)}…` : m;
+  return m.length > 220 ? `${m.slice(0, 217)}\u2026` : m;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -67,15 +74,54 @@ const VOICE_DEV_LOG = process.env.NEXT_PUBLIC_VOICE_DEV_LOG === "true";
 
 /**
  * Sent as `sendUserMessage` after `research_degree` returns so the agent takes its next turn.
- * Prefix is stripped from the live activity feed (not shown as “You said”).
+ * Prefix is stripped from the live activity feed (not shown as "You said").
  */
 const APP_RESEARCH_DONE_SENTINEL = "__donald_app:research_ok__ ";
 const APP_RESEARCH_DONE_NUDGE = `${APP_RESEARCH_DONE_SENTINEL}The research_degree tool already returned success with research_complete true. Speak now: begin your roast (Phase 3). Do not wait for the user to confirm.`;
 
+const APP_CV_READY_SENTINEL = "__donald_app:cv_ready__ ";
+
+function compactCvForVoice(a: CVAnalysisResult): string {
+  const profile: string[] = [];
+  if (a.candidate_name) profile.push(`NAME: ${a.candidate_name}`);
+  if (a.current_role) profile.push(`CURRENT_ROLE: ${a.current_role}`);
+  if (a.current_company) profile.push(`CURRENT_COMPANY: ${a.current_company}`);
+  if (a.experience_years) profile.push(`EXPERIENCE_YEARS: ${a.experience_years}`);
+  if (a.candidate_location) profile.push(`LOCATION: ${a.candidate_location}`);
+  if (a.education?.length) {
+    const edu = a.education.map((e) => `${e.degree} @ ${e.institution}${e.year ? ` (${e.year})` : ""}`).join("; ");
+    profile.push(`EDUCATION: ${edu}`);
+  }
+  if (a.skills?.length) profile.push(`KEY_SKILLS: ${a.skills.slice(0, 10).join(", ")}`);
+  if (a.experience_entries?.length) {
+    const exp = a.experience_entries.slice(0, 3).map((e) => `${e.title} @ ${e.company}${e.dates ? ` (${e.dates})` : ""}`).join("; ");
+    profile.push(`RECENT_ROLES: ${exp}`);
+  }
+
+  const fixes = (a.highlights || [])
+    .slice(0, 5)
+    .map((f) => `[${f.severity}/${f.section}] ${f.original_text} \u2192 ${f.suggested_text}`)
+    .join("; ");
+
+  return [
+    "--- CANDIDATE PROFILE (from CV) ---",
+    ...profile,
+    "",
+    "--- CV ANALYSIS ---",
+    `CV_SCORE: ${a.overall_score_0_100}/100`,
+    `VERDICT: ${a.overall_summary}`,
+    `STRENGTHS: ${a.strengths.join(", ")}`,
+    `FIXES: ${fixes}`,
+    a.coaching_notes ? `DONALD_TAKE: ${a.coaching_notes}` : "",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
+}
+
 function voiceDevJson(value: unknown, maxLen = 6000): string {
   try {
     const s = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    return s.length > maxLen ? `${s.slice(0, maxLen)}\n… [truncated ${s.length - maxLen} chars]` : s;
+    return s.length > maxLen ? `${s.slice(0, maxLen)}\n\u2026 [truncated ${s.length - maxLen} chars]` : s;
   } catch {
     return String(value);
   }
@@ -126,7 +172,7 @@ async function postWebhook(
   } catch (e) {
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(
-        "Research is taking too long — the connection timed out. Check your API keys and network, then try again."
+        "Research is taking too long \u2014 the connection timed out. Check your API keys and network, then try again."
       );
     }
     throw e;
@@ -144,16 +190,13 @@ function trimText(v: unknown, max = 360): string | undefined {
   if (typeof v !== "string") return undefined;
   const s = v.trim();
   if (!s) return undefined;
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+  return s.length > max ? `${s.slice(0, max - 1)}\u2026` : s;
 }
 
 function sanitizeNarrativePercentages(v: string): string {
   return v
-    // 57%
     .replace(/\b\d{1,3}\s*%/g, "high")
-    // 57 / 100
     .replace(/\b\d{1,3}\s*\/\s*100\b/g, "high")
-    // percentage words
     .replace(/\b\d{1,3}\s*percent\b/gi, "high");
 }
 
@@ -176,7 +219,6 @@ function compactResearchToolResult(raw: string): string {
   const reportNumbers = asObject(o.report_numbers);
   if (Object.keys(reportNumbers).length > 0) {
     out.report_numbers = reportNumbers;
-    // Mirror only from canonical report_numbers so spoken numbers match the report UI exactly.
     const canonical = [
       "currency_code",
       "grade",
@@ -202,7 +244,6 @@ function compactResearchToolResult(raw: string): string {
       if (k in reportNumbers) out[k] = reportNumbers[k];
     }
   } else {
-    // Fallback for older payloads that may not include report_numbers.
     const legacy = [
       "grade",
       "grade_score",
@@ -345,7 +386,7 @@ function normalizeVoiceProfilePayload(parameters: unknown): Record<string, unkno
     if (x === null || x === undefined || x === "") return null;
     if (typeof x === "number" && Number.isFinite(x)) return Math.round(x);
     if (typeof x === "string") {
-      const t = x.replace(/[,£$€\s]/g, "").trim();
+      const t = x.replace(/[,\u00a3$\u20ac\s]/g, "").trim();
       if (!t) return null;
       const n = parseInt(t, 10);
       return Number.isFinite(n) ? n : null;
@@ -379,12 +420,23 @@ function normalizeVoiceProfilePayload(parameters: unknown): Record<string, unkno
   return out;
 }
 
-export default function DonaldConversation({ sessionId, onComplete, onSdkActivity }: Props) {
+export default function DonaldConversation({
+  sessionId,
+  onComplete,
+  onSdkActivity,
+  preloadedCv,
+  autoStart = false,
+  onCvAnalysis,
+}: Props) {
   const [started, setStarted] = useState(false);
   const [statusText, setStatusText] = useState("Donald is ready. are you?");
   const [phase, setPhase] = useState<"idle" | "connecting" | "talking" | "done">("idle");
+  const [cvPhase, setCvPhase] = useState<"idle" | "uploading" | "sent">(preloadedCv ? "sent" : "idle");
+  const cvInputRef = useRef<HTMLInputElement>(null);
+  const cvPushedRef = useRef(false);
   const debugLogged = useRef(0);
   const metaLogged = useRef(false);
+  const autoStartAttemptedRef = useRef(false);
 
   const pushRef = useRef(onSdkActivity);
   pushRef.current = onSdkActivity;
@@ -410,14 +462,47 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
   const emitRef = useRef(emit);
   emitRef.current = emit;
 
-  /** Latest conversation API — set after `useConversation` so client tools can nudge the agent. */
+  /** Latest conversation API -- set after `useConversation` so client tools can nudge the agent. */
   const conversationNudgeRef = useRef<{
     sendUserMessage: (t: string) => void;
     sendContextualUpdate: (t: string) => void;
   } | null>(null);
 
   /**
-   * ElevenLabs *client* tools (browser → your API). Voice flow does not persist profile on the session;
+   * Push pre-loaded CV context into the agent after the connection is established.
+   */
+  const pushPreloadedCv = useCallback(() => {
+    if (!preloadedCv || cvPushedRef.current) return;
+    cvPushedRef.current = true;
+    const compact = compactCvForVoice(preloadedCv);
+    voiceDevLog("cv", "pushing pre-loaded CV to agent", { compact });
+
+    const conv = conversationNudgeRef.current;
+    if (!conv) return;
+    try {
+      conv.sendContextualUpdate(
+        `The user uploaded their CV before joining. Here is the structured analysis from Claude:\n${compact}\n\n` +
+        `INSTRUCTIONS — READ CAREFULLY:\n` +
+        `1. You already have their full profile from the CV — name, current role, company, education, skills, and experience. Do NOT ask them what they do, where they work, what they studied, or any basic info that's already in the profile above.\n` +
+        `2. Greet them by name and reference their role/company naturally.\n` +
+        `3. You MUST still call research_degree using the profile data extracted from the CV. Build the profile object from what you have: degree, university, graduation_year, current_job, current_company, years_experience, country_or_region. Run the research — the user still needs their roast numbers.\n` +
+        `4. If you need any info that's NOT in the CV (e.g. salary, tuition paid, specific graduation year if unclear), ask only those specific missing pieces. Do not re-ask anything already provided.\n` +
+        `5. Walk them through CV coaching (score, fixes, donald_take) either before or after the research — your call on timing. Keep it punchy, roasty, useful.\n` +
+        `6. Do NOT ask them to upload a CV again. Do NOT read data back like a report — turn each point into a conversational coaching beat.`,
+      );
+      emit({
+        event: "cv_ready",
+        title: "CV pre-loaded",
+        detail: `Score: ${preloadedCv.overall_score_0_100}/100 -- Donald has your CV analysis ready.`,
+        data: { cv_analysis: preloadedCv },
+      });
+    } catch (err) {
+      voiceDevLog("cv", "pre-loaded CV push failed", err);
+    }
+  }, [preloadedCv, emit]);
+
+  /**
+   * ElevenLabs *client* tools (browser -> your API). Voice flow does not persist profile on the session;
    * the agent passes an inline `profile` into `research_degree` for Firecrawl + Claude.
    */
   const voiceClientTools = useMemo(
@@ -436,8 +521,8 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
           title: VOICE_RESEARCH_CLIENT_START_TITLE,
           detail:
             n === 0
-              ? "Donald still needs your school, degree, grad year, and job — answer him first, then he can run this again."
-              : "Pulling public salary, tuition, and job-market info. Usually under a minute — stay on this tab.",
+              ? "Donald still needs your school, degree, grad year, and job -- answer him first, then he can run this again."
+              : "Pulling public salary, tuition, and job-market info. Usually under a minute -- stay on this tab.",
         });
         try {
           const rawOut = await postWebhook(
@@ -452,15 +537,14 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
           emitRef.current({
             event: "client_tool",
             title: VOICE_RESEARCH_CLIENT_DONE_TITLE,
-            detail: "Donald’s got the facts — he’ll keep the roast going. Peek at the feed if you’re curious what we checked.",
+            detail: "Donald's got the facts -- he'll keep the roast going. Peek at the feed if you're curious what we checked.",
           });
-          // Client tool return doesn’t always unpause voice — prompt the agent’s next turn explicitly.
           queueMicrotask(() => {
             const conv = conversationNudgeRef.current;
             if (!conv) return;
             try {
               conv.sendContextualUpdate(
-                "research_degree finished: research_complete is true in the tool result you received. Continue speaking immediately — start the roast. Do not ask the user to confirm research loaded."
+                "research_degree finished: research_complete is true in the tool result you received. Continue speaking immediately -- start the roast. Do not ask the user to confirm research loaded."
               );
               conv.sendUserMessage(APP_RESEARCH_DONE_NUDGE);
             } catch (err) {
@@ -480,7 +564,7 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
             error: msg,
             research_complete: false,
             agent_note:
-              "Research failed — do not roast. Briefly apologize and ask them to check connection or fill missing profile fields, then retry research_degree.",
+              "Research failed -- do not roast. Briefly apologize and ask them to check connection or fill missing profile fields, then retry research_degree.",
           });
         }
       },
@@ -496,7 +580,7 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
         emitRef.current({
           event: "client_tool",
           title: "Saving your best line",
-          detail: quote ? `“${quote.slice(0, 120)}${quote.length > 120 ? "…" : ""}”` : "Nothing to save yet.",
+          detail: quote ? `"${quote.slice(0, 120)}${quote.length > 120 ? "\u2026" : ""}"` : "Nothing to save yet.",
         });
         try {
           const out = await postWebhook("/api/webhooks/save_roast_quote", { session_id: sid, quote });
@@ -506,7 +590,7 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
           emitRef.current({
             event: "client_tool",
             title: "Line saved",
-            detail: "It’ll show up on your report card when you open it.",
+            detail: "It'll show up on your report card when you open it.",
           });
           return out;
         } catch (e) {
@@ -514,7 +598,7 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
           voiceDevLog("client_tool", "save_roast_quote error", { error: msg });
           emitRef.current({
             event: "client_tool_error",
-            title: "Couldn’t save that line",
+            title: "Couldn't save that line",
             detail: userFacingErrorMessage(msg),
           });
           return JSON.stringify({ error: msg, saved: false });
@@ -530,7 +614,11 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
       voiceDevLog("sdk", "onConnect", props);
       setPhase("talking");
       setStatusText("connected. Donald is listening...");
-      emit({ event: "connect", title: "You’re live with Donald", detail: "He can hear you — go ahead and talk." });
+      emit({ event: "connect", title: "You're live with Donald", detail: "He can hear you -- go ahead and talk." });
+
+      if (preloadedCv && !cvPushedRef.current) {
+        queueMicrotask(() => pushPreloadedCv());
+      }
     },
     onConversationMetadata: (meta) => {
       voiceDevLog("sdk", "onConversationMetadata", meta);
@@ -595,15 +683,15 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
       });
       const text = (props.message || "").trim();
       if (!text) return;
-      if (props.role === "user" && text.startsWith(APP_RESEARCH_DONE_SENTINEL)) {
-        voiceDevLog("sdk", "onMessage skipped app research nudge (not shown in activity feed)");
+      if (props.role === "user" && (text.startsWith(APP_RESEARCH_DONE_SENTINEL) || text.startsWith(APP_CV_READY_SENTINEL))) {
+        voiceDevLog("sdk", "onMessage skipped app nudge (not shown in activity feed)");
         return;
       }
       const title = props.role === "user" ? "You said" : "Donald said";
       emit({
         event: "transcript",
         title,
-        detail: text.length > 420 ? `${text.slice(0, 419)}…` : text,
+        detail: text.length > 420 ? `${text.slice(0, 419)}\u2026` : text,
       });
     },
     onAgentToolRequest: (p) => {
@@ -614,8 +702,8 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
         event: "agent_tool_request",
         title: toolLine(tn),
         detail: isOurs
-          ? `ElevenLabs triggered “${tn}” on the server (${p.tool_type || "type ?"}). This app only runs that tool in the **browser** (Client tool). In ElevenLabs → Agent → Tools, set ${tn} to **Client** and import \`prompts/elevenlabs-client-tools.json\` — not a webhook.`
-          : "One moment…",
+          ? `ElevenLabs triggered "${tn}" on the server (${p.tool_type || "type ?"}). This app only runs that tool in the **browser** (Client tool). In ElevenLabs > Agent > Tools, set ${tn} to **Client** and import \`prompts/elevenlabs-client-tools.json\`.`
+          : "One moment\u2026",
       });
     },
     onAgentToolResponse: (p) => {
@@ -623,13 +711,13 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
       emit({
         event: "agent_tool_response",
         title: "Done",
-        detail: p.is_error ? "That part didn’t work — you can still talk to Donald." : "Back to the conversation.",
+        detail: p.is_error ? "That part didn't work -- you can still talk to Donald." : "Back to the conversation.",
       });
     },
     onAgentChatResponsePart: (part) => {
       voiceDevLog("sdk", "onAgentChatResponsePart", part);
       if (part.type === "start") {
-        emit({ event: "agent_stream", title: "Donald is composing…", detail: "Streaming response" });
+        emit({ event: "agent_stream", title: "Donald is composing\u2026", detail: "Streaming response" });
       }
     },
     onUnhandledClientToolCall: (params) => {
@@ -639,8 +727,8 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
         event: "client_tool_unhandled",
         title: "Tool name mismatch",
         detail: tn
-          ? `The agent called “${tn}” but this page only handles: research_degree, save_roast_quote. Fix the tool name in ElevenLabs to match exactly (snake_case).`
-          : "Donald tried a client tool this build doesn’t handle. Check ElevenLabs tool names match research_degree and save_roast_quote.",
+          ? `The agent called "${tn}" but this page only handles: research_degree, save_roast_quote. Fix the tool name in ElevenLabs to match exactly (snake_case).`
+          : "Donald tried a client tool this build doesn't handle. Check ElevenLabs tool names match research_degree and save_roast_quote.",
       });
     },
     onInterruption: VOICE_DEV_LOG
@@ -682,6 +770,60 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
     }
   }, [isSpeaking, phase]);
 
+  useEffect(() => {
+    if (preloadedCv) onCvAnalysis?.(preloadedCv);
+  }, [preloadedCv, onCvAnalysis]);
+
+  const handleCvUpload = useCallback(
+    async (file: File) => {
+      setCvPhase("uploading");
+      emit({
+        event: "cv_upload",
+        title: "Uploading your CV",
+        detail: `Reading ${file.name}\u2026`,
+      });
+      try {
+        const { analysis } = await uploadCV(file, sessionId);
+        onCvAnalysis?.(analysis);
+        const compact = compactCvForVoice(analysis);
+        voiceDevLog("cv", "analysis ready, pushing to agent", { compact });
+
+        const conv = conversationNudgeRef.current;
+        if (conv) {
+          conv.sendContextualUpdate(
+            `The user just uploaded their CV mid-call. Here is the structured analysis from Claude:\n${compact}\n\n` +
+            `INSTRUCTIONS — READ CAREFULLY:\n` +
+            `1. You now have their full profile — name, current role, company, education, skills, experience. Do NOT ask them what they do, where they work, or any basic info already in the profile above.\n` +
+            `2. You MUST still call research_degree using the profile data from the CV. Build the profile object from what you have: degree, university, graduation_year, current_job, current_company, years_experience, country_or_region. The user still needs their roast numbers — run the research.\n` +
+            `3. If you need any info NOT in the CV (e.g. salary, tuition paid, specific graduation year if ambiguous), ask only those specific missing pieces. Do not re-ask anything already provided.\n` +
+            `4. Walk the user through the CV coaching: score, verdict, critical fixes, donald_take. Keep it punchy, roasty, useful. Do NOT read the data like a report — turn each point into a conversational coaching beat.\n` +
+            `5. Do NOT ask them to upload a CV again.`,
+          );
+          conv.sendUserMessage(
+            `${APP_CV_READY_SENTINEL}I just uploaded my CV. Walk me through it.`,
+          );
+        }
+
+        emit({
+          event: "cv_ready",
+          title: "CV analysis ready",
+          detail: `Score: ${analysis.overall_score_0_100}/100 -- Donald has the results.`,
+          data: { cv_analysis: analysis },
+        });
+        setCvPhase("sent");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Upload failed";
+        emit({
+          event: "cv_error",
+          title: "CV upload failed",
+          detail: msg,
+        });
+        setCvPhase("idle");
+      }
+    },
+    [sessionId, emit],
+  );
+
   const start = useCallback(async () => {
     setPhase("connecting"); setStatusText("connecting you to Donald...");
     const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
@@ -693,11 +835,24 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
     const dynamicVariables: Record<string, string | number | boolean> = {
       session_id: sessionId,
       sessionId,
-      // Some agent configs reference this key directly in templates.
-      // Send a safe default so missing-variable runtime errors don't kill the call.
       error_event: "none",
       errorEvent: "none",
     };
+
+    if (preloadedCv) {
+      dynamicVariables.cv_uploaded = true;
+      dynamicVariables.cv_score = preloadedCv.overall_score_0_100;
+      dynamicVariables.cv_verdict = preloadedCv.overall_summary;
+      if (preloadedCv.file_name) dynamicVariables.cv_file_name = preloadedCv.file_name;
+      if (preloadedCv.candidate_name) dynamicVariables.cv_name = preloadedCv.candidate_name;
+      if (preloadedCv.current_role) dynamicVariables.cv_role = preloadedCv.current_role;
+      if (preloadedCv.current_company) dynamicVariables.cv_company = preloadedCv.current_company;
+      if (preloadedCv.education?.length) {
+        dynamicVariables.cv_degree = preloadedCv.education[0].degree;
+        dynamicVariables.cv_university = preloadedCv.education[0].institution;
+      }
+    }
+
     voiceDevLog("session", "startSession requested", {
       agentId,
       useToken: USE_CONVAI_TOKEN,
@@ -719,7 +874,7 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
         }
         const { token } = (await res.json()) as { token: string };
         voiceDevLog("session", "startSession (token + webrtc)", {
-          tokenPreview: `${token.slice(0, 12)}…(${token.length} chars)`,
+          tokenPreview: `${token.slice(0, 12)}\u2026(${token.length} chars)`,
           dynamicVariables,
         });
         await conversation.startSession({
@@ -737,8 +892,8 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
       }
       emit({
         event: "webrtc_ready",
-        title: "You’re connected",
-        detail: "Mic is on — say hi to Donald.",
+        title: "You're connected",
+        detail: "Mic is on -- say hi to Donald.",
       });
       setStarted(true);
     } catch (e) {
@@ -750,11 +905,17 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
       setStatusText(
         e instanceof Error && e.name === "NotAllowedError"
           ? "Mic access is required so Donald can hear you."
-          : "Couldn’t connect. Check your internet and try again."
+          : "Couldn't connect. Check your internet and try again."
       );
       setPhase("idle");
     }
-  }, [conversation, sessionId, emit]);
+  }, [conversation, sessionId, emit, preloadedCv]);
+
+  useEffect(() => {
+    if (!autoStart || started || phase !== "idle" || autoStartAttemptedRef.current) return;
+    autoStartAttemptedRef.current = true;
+    void start();
+  }, [autoStart, started, phase, start]);
 
   const end = useCallback(async () => {
     voiceDevLog("session", "endSession (user clicked End)");
@@ -825,6 +986,46 @@ export default function DonaldConversation({ sessionId, onComplete, onSdkActivit
         <p className="text-[var(--subtle)]/50 text-xs text-center max-w-xs">
           This is a live voice conversation. Donald will ask for your degree and work details, then deliver his verdict.
         </p>
+      )}
+
+      {/* CV upload during call (always available while talking) */}
+      {phase === "talking" && (
+        <div className="w-full max-w-xs">
+          <input
+            ref={cvInputRef}
+            type="file"
+            accept=".pdf,.docx,.txt"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleCvUpload(f);
+            }}
+            className="hidden"
+          />
+
+          {cvPhase === "uploading" ? (
+            <div className="flex items-center justify-center gap-2 py-2 text-xs text-[var(--subtle)]">
+              <span className="w-3 h-3 border-2 border-transparent border-t-[var(--gold)] rounded-full animate-spin" />
+              Analyzing your CV...
+            </div>
+          ) : (
+            <div className="text-center">
+              {cvPhase === "sent" ? (
+                <p className="text-[var(--gold)] text-xs mb-1.5">
+                  CV loaded. Upload another anytime.
+                </p>
+              ) : null}
+              <button
+                onClick={() => {
+                  if (cvInputRef.current) cvInputRef.current.value = "";
+                  cvInputRef.current?.click();
+                }}
+                className="w-full py-2 px-4 rounded-lg border border-dashed border-white/10 bg-[var(--card)] hover:border-[var(--gold-dim)] text-xs text-[var(--subtle)] hover:text-[var(--fg)] transition-all text-center"
+              >
+                Upload CV (PDF/DOCX/TXT)
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

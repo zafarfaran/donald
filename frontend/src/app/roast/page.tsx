@@ -6,8 +6,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import ConversationBubble from "@/components/ConversationBubble";
 import DonaldConversation from "@/components/DonaldConversation";
 import VoiceActivityPanel, { type VoiceActivityRow } from "@/components/VoiceActivityPanel";
+import CVCoachSection from "@/components/CVCoachSection";
 import Navbar from "@/components/Navbar";
-import { createVoiceSession, fetchVoiceActivity } from "@/lib/api";
+import { createVoiceSession, fetchVoiceActivity, type CVAnalysisResult } from "@/lib/api";
 import { BurningCapIcon, MicIcon } from "@/components/icons";
 
 const ELEVENLABS_AGENT_CONFIGURED = !!process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
@@ -27,6 +28,8 @@ export default function RoastPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [startError, setStartError] = useState<string>("");
+  const [autoStartVoice, setAutoStartVoice] = useState(false);
+  const [cvAnalysis, setCvAnalysis] = useState<CVAnalysisResult | null>(null);
   const [liveActivity, setLiveActivity] = useState<VoiceActivityRow[]>([]);
   const [serverActivity, setServerActivity] = useState<VoiceActivityRow[]>([]);
   const [activityPoll, setActivityPoll] = useState<{ ok: boolean; error?: string; at: number }>({
@@ -84,12 +87,13 @@ export default function RoastPage() {
     [liveActivity, serverActivity]
   );
 
-  const createAndStart = async () => {
+  const createAndStart = useCallback(async (opts?: { autoStart?: boolean }) => {
     setLoading(true);
     setStartError("");
     try {
       const session = await createVoiceSession();
       setSessionId(session.session_id);
+      setAutoStartVoice(Boolean(opts?.autoStart));
       setStep("webcall");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not start voice call.";
@@ -97,7 +101,7 @@ export default function RoastPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   return (
     <main className="relative min-h-screen flex flex-col overflow-x-hidden">
@@ -116,12 +120,14 @@ export default function RoastPage() {
               <BurningCapIcon size={40} className="text-[var(--gold)] mx-auto mb-6" />
               <h1 className="font-display text-3xl md:text-4xl mb-2">How do you want to <em>talk to Donald?</em></h1>
               <p className="text-[var(--subtle)] text-sm font-light mb-10 max-w-md mx-auto leading-relaxed">
-                web call only for now. same voice reality check, faster shipping.
+                he&apos;ll roast your degree, coach your CV, and help you career max. web call only for now.
               </p>
 
               <div className="mb-8">
                 <motion.button
-                  onClick={createAndStart}
+                  onClick={() => {
+                    void createAndStart();
+                  }}
                   disabled={loading}
                   whileHover={{ y: -3 }}
                   whileTap={{ scale: 0.98 }}
@@ -132,7 +138,7 @@ export default function RoastPage() {
                   </div>
                   <h3 className="text-base font-semibold mb-1">Web Call</h3>
                   <p className="text-[var(--subtle)] text-xs font-light leading-relaxed">
-                    talk to Donald right here in your browser. no download, no signup. just vibes and regret.
+                    talk to Donald right here in your browser. no download, no signup. roast + real career advice.
                   </p>
                   <div className="mt-4 flex items-center gap-1.5 text-[var(--gold)] text-xs font-semibold">
                     <MicIcon size={14} />
@@ -145,11 +151,6 @@ export default function RoastPage() {
                   {startError}
                 </p>
               )}
-
-              {/*
-                Phone-call UI intentionally disabled for faster production launch.
-                Keep this page web-only for now and re-enable when the phone stack is ready.
-              */}
 
               <p className="text-[var(--subtle)]/30 text-[10px] mt-6">
                 we don&apos;t store anything. Donald forgets you the second the call ends.
@@ -183,6 +184,8 @@ export default function RoastPage() {
                       sessionId={sessionId}
                       onComplete={() => router.push(`/report/${sessionId}`)}
                       onSdkActivity={appendLiveActivity}
+                      autoStart={autoStartVoice}
+                      onCvAnalysis={setCvAnalysis}
                     />
                   </div>
                   <VoiceActivityPanel
@@ -193,6 +196,9 @@ export default function RoastPage() {
                   />
                 </div>
               ) : null}
+              {cvAnalysis && (
+                <CVCoachSection analysis={cvAnalysis} />
+              )}
               {!ELEVENLABS_AGENT_CONFIGURED && (
                 <div className="flex items-center justify-center gap-2 text-[var(--gold)] text-xs">
                   <span className="w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />

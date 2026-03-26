@@ -14,13 +14,13 @@ const steps = [
   {
     icon: ChartDownIcon,
     title: "Donald digs",
-    hint: "Salary · AI risk · ROI",
+    hint: "Salary · AI risk · market",
     color: "var(--red)",
   },
   {
     icon: GavelIcon,
-    title: "Voice take + tier",
-    hint: "Vibe sheet · reality",
+    title: "Roast + game plan",
+    hint: "Verdict · career moves",
     color: "var(--gold)",
   },
 ];
@@ -43,8 +43,8 @@ export default function WalkthroughSection() {
           transition={{ duration: 0.55 }}
           className="text-center mb-14 md:mb-20"
         >
-          <span className="text-[var(--red)] text-xs font-semibold tracking-[0.2em] uppercase">Walkthrough</span>
-          <h2 className="font-display text-3xl md:text-5xl mt-2">Three beats. <em>One verdict.</em></h2>
+          <span className="text-[var(--red)] text-xs font-semibold tracking-[0.2em] uppercase">How it works</span>
+          <h2 className="font-display text-3xl md:text-5xl mt-2">Three beats. <em>One game plan.</em></h2>
         </motion.div>
 
         <div className="relative grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-6">

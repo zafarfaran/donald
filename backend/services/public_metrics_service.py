@@ -47,6 +47,17 @@ def _safe_int(v: Any) -> int | None:
     return n
 
 
+def _tuition_gap_positive_usd(card: ReportCard) -> int:
+    """Opportunity-cost gap for one card (same as contrib + aggregate). Not FX-normalized; field name is legacy USD."""
+    r = card.research
+    gap = _safe_int(r.tuition_opportunity_gap)
+    if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
+        gap = int(r.tuition_if_invested - r.estimated_tuition)
+    if gap is not None and gap > 0:
+        return int(gap)
+    return 0
+
+
 def _normalize_regret_sum_0_5(
     *,
     total_cards: int,
@@ -154,13 +165,9 @@ def _compute_from_cards(cards: list[ReportCard], *, people_count: int | None = N
         if grade in {"C", "D", "F"}:
             c_or_worse += 1
 
-        r = card.research
-        gap = _safe_int(r.tuition_opportunity_gap)
-        if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
-            gap = int(r.tuition_if_invested - r.estimated_tuition)
-        if gap is not None and gap > 0:
-            tuition_in_shambles += gap
+        tuition_in_shambles += _tuition_gap_positive_usd(card)
 
+        r = card.research
         cooked = _safe_int(r.overall_cooked_0_100)
         if cooked is None:
             cooked = _safe_int(r.ai_replacement_risk_0_100) or 50
@@ -233,12 +240,9 @@ def _card_contribution(card: ReportCard) -> dict[str, Any]:
     grade = (card.grade or "").strip().upper()
     c_or_worse = 1 if grade in {"C", "D", "F"} else 0
 
-    r = card.research
-    gap = _safe_int(r.tuition_opportunity_gap)
-    if gap is None and r.estimated_tuition is not None and r.tuition_if_invested is not None:
-        gap = int(r.tuition_if_invested - r.estimated_tuition)
-    tuition_gap = gap if (gap is not None and gap > 0) else 0
+    tuition_gap = _tuition_gap_positive_usd(card)
 
+    r = card.research
     cooked = _safe_int(r.overall_cooked_0_100)
     if cooked is None:
         cooked = _safe_int(r.ai_replacement_risk_0_100) or 50

@@ -3,9 +3,9 @@ import "./globals.css";
 import { FirebaseRoot } from "@/components/FirebaseRoot";
 
 export const metadata: Metadata = {
-  title: "Donald | Is Your Degree Cooked?",
+  title: "Donald | Is AI Coming For Your Job?",
   description:
-    "AI is coming for your job. Donald researches your degree, checks AI replacement risk, and hits you with a voice reality check and receipts.",
+    "An AI that tells you how replaceable your job is, whether your degree still holds value, and gives you a clear path to stay ahead. No sugarcoating.",
   icons: {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
