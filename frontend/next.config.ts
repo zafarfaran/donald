@@ -26,12 +26,8 @@ function devOriginsFromEnv(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** Default tunnel host for local dev (change if ngrok gives you a new subdomain). */
-const DEFAULT_NGROK_DEV_HOST = "lesia-unprojecting-drably.ngrok-free.dev";
-
 const allowedDevOrigins = Array.from(
   new Set([
-    DEFAULT_NGROK_DEV_HOST,
     ...devOriginsFromEnv(process.env.NGROK_URL),
     ...devOriginsFromEnv(process.env.ALLOWED_DEV_ORIGINS),
   ])
