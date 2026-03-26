@@ -60,10 +60,12 @@ if _trusted:
 _cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://heyitsdonald.com",
+    "https://www.heyitsdonald.com",
 ]
 for _part in (os.getenv("FRONTEND_URL") or "").split(","):
     _o = _part.strip().rstrip("/")
-    if _o:
+    if _o and _o not in _cors_origins:
         _cors_origins.append(_o)
 
 _cors_origin_regex = (os.getenv("CORS_ORIGIN_REGEX") or "").strip() or None
