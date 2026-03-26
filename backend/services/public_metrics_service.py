@@ -223,19 +223,6 @@ async def _collect_report_cards(store) -> list[ReportCard]:
     return cards
 
 
-async def _overlay_tuition_calculated_from_report_cards(store, canonical: dict[str, Any]) -> None:
-    """
-    Replace tuition_in_shambles with a sum over all report cards (gap or invested minus tuition).
-    Does not read the cached aggregate field — source of truth is session report_card payloads.
-    """
-    cards = await _collect_report_cards(store)
-    live = sum(_tuition_gap_positive_usd(c) for c in cards)
-    canonical["tuition_in_shambles_usd"] = int(live)
-    disp = canonical.get("display")
-    if isinstance(disp, dict):
-        disp["tuition_in_shambles"] = _format_compact_usd(int(live))
-
-
 async def _count_sessions(store) -> int:
     if getattr(store, "uses_firestore", False):
         db = get_async_firestore()
@@ -494,7 +481,6 @@ async def get_public_metrics(store) -> dict[str, Any]:
             canonical["people_talked_to_donald"] = max(0, int(people_count))
             canonical.setdefault("display", {})
             canonical["display"]["people_talked_to_donald"] = f"{max(0, int(people_count)):,}+"
-            await _overlay_tuition_calculated_from_report_cards(store, canonical)
             setattr(store, "_metrics_snapshot", canonical)
             return canonical
     snap = await _read_metrics_snapshot()
@@ -506,7 +492,6 @@ async def get_public_metrics(store) -> dict[str, Any]:
         # Self-heal legacy snapshots in Firestore when canonical values changed.
         if canonical != snap:
             await _write_metrics_snapshot(canonical)
-        await _overlay_tuition_calculated_from_report_cards(store, canonical)
         return canonical
     return await recompute_public_metrics(store)
 
